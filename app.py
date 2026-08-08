@@ -75,13 +75,24 @@ def build_qa_df(data):
 
 def build_azure_df(data):
     rows = []
-    for tc in data["TEST_CASES"]:
-        title = tc.get("Title", "")
-        # New cases: Azure ID remains empty.
+    for tc in data.get("TEST_CASES", []):
+        # Azure master pattern: one case row followed by its numbered steps.
+        rows.append({
+            "TestCaseId": tc.get("ID", ""),
+            "Title": tc.get("Title", ""),
+            "TestStep": "",
+            "StepAction": "",
+            "StepExpected": "",
+            "TestPointId": "",
+            "Configuration": "",
+            "Tester": "",
+            "Outcome": "",
+            "Comment": ""
+        })
         for step in tc.get("Steps", []) or []:
             rows.append({
                 "TestCaseId": "",
-                "Title": title,
+                "Title": "",
                 "TestStep": step.get("Step #", ""),
                 "StepAction": step.get("Action", ""),
                 "StepExpected": step.get("Expected value", ""),
@@ -91,7 +102,10 @@ def build_azure_df(data):
                 "Outcome": "",
                 "Comment": ""
             })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=[
+        "TestCaseId", "Title", "TestStep", "StepAction", "StepExpected",
+        "TestPointId", "Configuration", "Tester", "Outcome", "Comment"
+    ])
 
 def format_sheet(ws):
     ws.freeze_panes = "A2"
@@ -312,14 +326,14 @@ if "result" in st.session_state:
         st.download_button(
             "Descargar Excel — Azure + Datos QA",
             data=excel_bytes,
-            file_name="Agente_QA_V1_4_Azure_QA.xlsx",
+            file_name="Agente_QA_V1_5_Azure_QA.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
         st.download_button(
             "Descargar PDF — Resumen QA",
             data=pdf_bytes,
-            file_name="Agente_QA_V1_4_Resumen_QA.pdf",
+            file_name="Agente_QA_V1_5_Resumen_QA.pdf",
             mime="application/pdf"
         )
 

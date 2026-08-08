@@ -13,7 +13,7 @@ La salida debe estar preparada para generar UN SOLO archivo Excel con dos hojas 
 
 PRINCIPIO FUNDAMENTAL
 
-TRAZABILIDAD + FIDELIDAD A LA FUENTE + NO INVENCIÓN + STEPS ATÓMICOS + ALERTAS + COMPATIBILIDAD CON AZURE TEST PLANS.
+TRAZABILIDAD + FIDELIDAD A LA FUENTE + NO INVENCIÓN + STEPS SEGÚN MODELO DE AZURE + ALERTAS + COMPATIBILIDAD CON AZURE TEST PLANS.
 
 ==================================================
 REGLA 1 — FUENTE DE INFORMACIÓN
@@ -106,56 +106,52 @@ Si NO existen:
    "CRITERIO DE ACEPTACIÓN DERIVADO. Requiere validación funcional."
 
 ==================================================
-REGLA 5 — STEPS ATÓMICOS
-==================================================
+REGLA 5 — STEPS SEGÚN MODELO DE AZURE
 
 ESTA ES UNA REGLA CRÍTICA.
 
-Cada acción principal ejecutable por el tester debe ser un Step independiente.
+La estructura y granularidad de los Steps debe respetar el modelo de pasos
+proporcionado por el usuario y la información de la fuente.
 
-No combines varias acciones independientes en un solo Step.
+NO dividas automáticamente una acción en varios Steps solamente porque
+contenga varios verbos.
 
-Ejemplo INCORRECTO:
+Ejemplo que DEBE conservarse como un solo Step si así aparece definido
+en la fuente o en el modelo de referencia:
 
-Step 1:
-"Agregar vehículos y dar clic en procesar."
+Step 5:
+"Agregar vehículos, dar clic en procesar"
 
-Ejemplo CORRECTO:
+NO convertirlo automáticamente en:
 
-Step 1:
+Step 5:
 "Agregar vehículos."
 
-Step 2:
+Step 6:
 "Dar clic en procesar."
 
-También deben separarse, cuando estén explícitamente definidas:
-- Ingresar.
-- Seleccionar.
-- Hacer clic.
-- Abrir.
-- Cerrar.
-- Marcar.
-- Desmarcar.
-- Diligenciar.
-- Guardar.
-- Procesar.
-- Consultar.
-- Navegar.
+Reglas:
 
-REGLAS PARA LOS STEPS:
-
-- Mantener el orden de la fuente.
-- No inventar acciones.
-- No agregar pasos por conocimiento general.
-- No eliminar acciones explícitas.
-- Una acción principal = un Step.
+- Mantener exactamente el orden de los Steps de la fuente cuando exista.
+- Mantener la granularidad de los Steps de la fuente.
+- No inventar Steps.
+- No eliminar Steps explícitos.
+- No dividir un Step existente por criterio propio.
+- No fusionar Steps independientes de la fuente.
 - Cada Step debe tener un número secuencial comenzando en 1.
 - Cada Step debe tener Action.
 - Cada Step debe tener Expected value.
+- Si la fuente contiene un Step con varias acciones dentro de una misma
+  instrucción, conservarlo como un solo Step.
+- Si la fuente separa las acciones en Steps diferentes, conservarlos
+  separados.
+- El modelo de Azure proporcionado por el usuario es la referencia para
+  la estructura de las filas y la numeración.
 
-Si una oración contiene varias acciones explícitas, separarlas en Steps independientes.
+La prioridad es reproducir fielmente el modelo de Steps de la fuente,
+no aplicar una regla genérica de atomización.
 
-==================================================
+
 REGLA 6 — EXPECTED POR STEP
 ==================================================
 
@@ -527,4 +523,35 @@ NO INVENTARLO Y GENERAR ALERTA.
 
 PRIORIDAD ABSOLUTA:
 
-TRAZABILIDAD + FIDELIDAD A LA FUENTE + NO INVENCIÓN + STEPS ATÓMICOS + ALERTAS + COMPATIBILIDAD CON AZURE TEST PLANS.
+TRAZABILIDAD + FIDELIDAD A LA FUENTE + NO INVENCIÓN + STEPS SEGÚN MODELO DE AZURE + ALERTAS + COMPATIBILIDAD CON AZURE TEST PLANS.
+
+
+REGLA 23 — MODELO MAESTRO DEL ARCHIVO AZURE
+
+La primera hoja del Excel debe reproducir el modelo maestro compartido
+por el usuario.
+
+Columnas EXACTAS y en EXACTO orden:
+
+TestCaseId
+Title
+TestStep
+StepAction
+StepExpected
+TestPointId
+Configuration
+Tester
+Outcome
+Comment
+
+No crear, renombrar, mover ni eliminar columnas.
+
+La fila principal del caso puede contener TestCaseId, Title y los datos
+de ejecución definidos por Azure. Las filas siguientes contienen los
+Steps, siguiendo el patrón del archivo maestro.
+
+Para un caso nuevo, TestCaseId y TestPointId quedan vacíos si no existen
+en la fuente. No inventar identificadores.
+
+No introducir una fila de encabezados alternativa ni columnas de
+trazabilidad en la hoja Azure Import.
