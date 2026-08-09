@@ -57,13 +57,6 @@ st.markdown("""
         border: 2px dashed #2B6CB0;
         text-align: center;
     }
-    .quota-warning {
-        background-color: #fff3cd;
-        border: 1px solid #ffc107;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
     .model-badge {
         background-color: #28a745;
         color: white;
@@ -115,16 +108,15 @@ if 'retry_count' not in st.session_state:
 # ============================================
 
 # Modelo por defecto según especificación
-DEFAULT_MODEL = "gemini-3.6-flash"
+MODEL = "gemini-3.6-flash"
 
 # Modelos alternativos (fallback)
 FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
 
 # ============================================
-# ESQUEMA JSON PARA LA RESPUESTA
+# ESQUEMA JSON PARA LA RESPUESTA - NO CAMBIAR
 # ============================================
 
-# SCHEMA - NO CAMBIAR
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -254,13 +246,11 @@ def get_valid_models(api_key):
             if 'generateContent' in model.supported_generation_methods:
                 model_name = model.name.split('/')[-1]
                 if 'gemini' in model_name.lower():
-                    # Excluir modelos 2.0 obsoletos
                     if '2.0' not in model_name.lower():
                         valid_models.append(model_name)
         
-        # Asegurar que gemini-3.6-flash esté en la lista
-        if DEFAULT_MODEL not in valid_models:
-            valid_models.insert(0, DEFAULT_MODEL)
+        if MODEL not in valid_models:
+            valid_models.insert(0, MODEL)
         
         if not valid_models:
             valid_models = FALLBACK_MODELS.copy()
@@ -308,21 +298,19 @@ with st.sidebar:
     # Configuración del modelo
     st.subheader("🎯 Modelo")
     
-    # Asegurar que gemini-3.6-flash esté seleccionado por defecto
-    if DEFAULT_MODEL in valid_models:
-        default_index = valid_models.index(DEFAULT_MODEL)
+    if MODEL in valid_models:
+        default_index = valid_models.index(MODEL)
     else:
         default_index = 0
     
     selected_model = st.selectbox(
         "Seleccionar modelo",
         options=valid_models,
-        index=default_index if DEFAULT_MODEL in valid_models else 0,
+        index=default_index if MODEL in valid_models else 0,
         help="Modelos Gemini disponibles. Se recomienda Gemini 3.6 Flash"
     )
     
-    # Mostrar modelo recomendado
-    if selected_model == DEFAULT_MODEL:
+    if selected_model == MODEL:
         st.success("✅ Modelo recomendado: Gemini 3.6 Flash")
     else:
         st.info(f"ℹ️ Modelo seleccionado: {selected_model}")
@@ -363,6 +351,7 @@ with st.sidebar:
     **Modelo**: {selected_model}
     **Temperatura**: {temperature}
     **Reintentos**: {max_retries}
+    **Max tokens**: 65536
     **Modelos disponibles**: {len(valid_models)}
     """)
     
@@ -371,15 +360,6 @@ with st.sidebar:
     
     if st.session_state.retry_count > 0:
         st.info(f"🔄 Reintentos: {st.session_state.retry_count}")
-    
-    # Nota sobre modelos
-    with st.expander("ℹ️ Modelos disponibles"):
-        st.write("**Recomendado:**")
-        st.success(f"✅ {DEFAULT_MODEL}")
-        st.write("**Alternativos:**")
-        for m in valid_models:
-            if m != DEFAULT_MODEL:
-                st.write(f"• {m}")
 
 # ============================================
 # SECCIÓN PRINCIPAL - CARGA DE ARCHIVOS
@@ -447,7 +427,6 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"❌ Error al procesar DOCX: {str(e)}")
         
-        # Mostrar preview
         with st.expander("📄 Vista previa del contenido", expanded=True):
             st.text_area(
                 "Contenido del archivo:",
@@ -504,7 +483,6 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
         models = genai.list_models()
         model_found = False
         
-        # Intentar con el modelo seleccionado
         for m in models:
             if m.name.endswith(model_name) and 'generateContent' in m.supported_generation_methods:
                 model_found = True
@@ -550,32 +528,43 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
             status_text.text(f"⏳ Intento {attempt + 1} de {max_retries + 1} con {model_name}...")
             progress_bar.progress(10 + (attempt * 20))
             
-            # Configurar el modelo con el esquema
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "response_schema": SCHEMA,  # SCHEMA - NO CAMBIAR
-                    "max_output_tokens": 8192,
-                    "temperature": temperature,
-                    "top_p": 0.95
-                }
-            )
+            # ============================================
+            # LLAMADA A GEMINI CON CONFIGURACIÓN ESPECÍFICA
+            # ============================================
             
-            # Generar contenido
-            response = model.generate_content(full_prompt)
+            # Configurar el cliente
+            client = genai
+            
+            # Realizar la llamada con la configuración especificada
+            r = client.models.generate_content(
+                model=model_name,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=SCHEMA,      # SCHEMA - NO CAMBIAR
+                    max_output_tokens=65536      # 65536 tokens para respuestas largas
+                )
+            )
             
             progress_bar.progress(70)
             status_text.text("⏳ Procesando respuesta...")
             
-            if not response.text:
-                raise ValueError("❌ Gemini no devolvió contenido")
+            # Obtener el texto de la respuesta
+            text = r.text.strip()
             
-            # Parsear JSON
+            # Intentar parsear el JSON
             try:
-                data = json.loads(response.text)
+                data = json.loads(text)
             except json.JSONDecodeError as e:
-                clean_text = response.text.strip()
+                # Capturar el finish_reason para diagnóstico
+                finish_reason = ""
+                try:
+                    finish_reason = str(r.candidates[0].finish_reason)
+                except Exception:
+                    pass
+                
+                # Intentar limpiar la respuesta
+                clean_text = text
                 json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
                 if json_match:
                     clean_text = json_match.group(1)
@@ -585,8 +574,12 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
                 try:
                     data = json.loads(clean_text)
                 except json.JSONDecodeError:
-                    preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
-                    raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
+                    # Lanzar error detallado
+                    raise RuntimeError(
+                        f"✖ Gemini devolvió JSON incompleto o inválido. "
+                        f"Finish reason: {finish_reason}. "
+                        f"Detalle: {e}"
+                    )
             
             # Validar estructura
             validated_data = validate_qa_structure(data)
@@ -614,7 +607,6 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
                 st.session_state.retry_count = attempt + 1
                 
                 if attempt < max_retries:
-                    # Extraer tiempo de espera sugerido
                     retry_time = wait_time * (attempt + 1)
                     try:
                         time_match = re.search(r'retry in (\d+\.?\d*)s', error_str)
@@ -667,7 +659,7 @@ def validate_qa_structure(data):
     return data
 
 # ============================================
-# FUNCIONES DE GENERACIÓN DE ARCHIVOS
+# FUNCIONES DE GENERACIÓN DE ARCHIVOS - NO CAMBIAR
 # ============================================
 
 def get_safe_text(text, default=""):
