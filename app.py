@@ -40,13 +40,6 @@ st.markdown("""
         margin-bottom: 2rem;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2B6CB0;
-        margin-bottom: 0.5rem;
-    }
     .draft-badge {
         background-color: #ffc107;
         color: #1A365D;
@@ -55,6 +48,13 @@ st.markdown("""
         font-weight: bold;
         font-size: 0.8rem;
         display: inline-block;
+    }
+    .upload-section {
+        background-color: #f8f9fa;
+        padding: 2rem;
+        border-radius: 10px;
+        border: 2px dashed #2B6CB0;
+        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -68,7 +68,7 @@ st.markdown("""
         <h1>🤖 Agente QA V8 — Generador de Casos de Prueba</h1>
         <p style="margin: 0; opacity: 0.9;">
             <span class="draft-badge">VERSION PREVIA — DRAFT</span>
-            &nbsp; Análisis de Historias de Usuario y generación de casos de prueba para QA
+            &nbsp; Análisis de documentos y generación de casos de prueba para QA
         </p>
     </div>
 """, unsafe_allow_html=True)
@@ -85,8 +85,8 @@ if 'last_processed' not in st.session_state:
     st.session_state.last_processed = None
 if 'source_content' not in st.session_state:
     st.session_state.source_content = ""
-if 'available_models' not in st.session_state:
-    st.session_state.available_models = []
+if 'valid_models' not in st.session_state:
+    st.session_state.valid_models = []
 
 # ============================================
 # CARGA DEL PROMPT
@@ -121,35 +121,40 @@ def get_default_prompt():
 system_prompt = load_system_prompt()
 
 # ============================================
-# FUNCIÓN PARA OBTENER MODELOS DISPONIBLES
+# FUNCIÓN PARA OBTENER MODELOS VÁLIDOS
 # ============================================
 
 @st.cache_data(ttl=3600)
-def get_available_models(api_key):
-    """Obtiene la lista de modelos disponibles con Gemini"""
+def get_valid_models(api_key):
+    """Obtiene solo los modelos que soportan generateContent"""
     try:
         genai.configure(api_key=api_key)
         models = genai.list_models()
         
-        # Filtrar modelos que soportan generateContent
-        available = []
+        valid_models = []
         for model in models:
             if 'generateContent' in model.supported_generation_methods:
-                # Extraer solo el nombre del modelo sin la ruta completa
                 model_name = model.name.split('/')[-1]
-                # Filtrar modelos relevantes para QA
-                if any(x in model_name.lower() for x in ['gemini', 'pro', 'flash']):
-                    available.append(model_name)
+                # Solo modelos Gemini que soportan generación de texto
+                if 'gemini' in model_name.lower():
+                    valid_models.append(model_name)
         
-        # Modelos por defecto si no se encuentran otros
-        if not available:
-            available = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        # Si no se encontraron modelos, usar los comunes
+        if not valid_models:
+            valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
         
-        return sorted(set(available))
+        # Ordenar y eliminar duplicados
+        valid_models = sorted(set(valid_models))
+        
+        # Filtrar modelos de investigación
+        invalid_patterns = ['research', 'preview', 'interactions']
+        valid_models = [m for m in valid_models if not any(p in m.lower() for p in invalid_patterns)]
+        
+        return valid_models
+        
     except Exception as e:
         st.warning(f"⚠️ No se pudieron listar los modelos: {str(e)}")
-        # Modelos comunes como fallback
-        return ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro']
+        return ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
 
 # ============================================
 # SIDEBAR - CONFIGURACIÓN
@@ -164,41 +169,41 @@ with st.sidebar:
     if api_key_from_secrets:
         st.success("✅ API Key configurada desde Secrets")
         api_key = api_key_from_secrets
-        show_key_input = st.checkbox("Mostrar campo de API Key", value=False)
-        if show_key_input:
-            api_key = st.text_input("API Key (override)", type="password", value=api_key)
     else:
         st.warning("⚠️ No se encontró GEMINI_API_KEY en Secrets")
         api_key = st.text_input(
-            "Google Gemini API Key",
+            "🔑 Google Gemini API Key",
             type="password",
             help="Obtén tu API Key en https://makersuite.google.com/app/apikey"
         )
     
-    # Si hay API Key, obtener modelos disponibles
+    # Obtener modelos válidos si hay API Key
     if api_key:
         try:
-            available_models = get_available_models(api_key)
-            st.session_state.available_models = available_models
+            valid_models = get_valid_models(api_key)
+            st.session_state.valid_models = valid_models
         except Exception as e:
-            st.warning(f"⚠️ Usando modelos por defecto: {str(e)}")
-            available_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
-            st.session_state.available_models = available_models
+            st.error(f"❌ Error al obtener modelos: {str(e)}")
+            valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+            st.session_state.valid_models = valid_models
     else:
-        available_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
-        st.session_state.available_models = available_models
+        valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        st.session_state.valid_models = valid_models
     
     st.divider()
     
     # Configuración del modelo
     st.subheader("🎯 Modelo")
     
-    # Mostrar modelos disponibles
-    selected_model = st.selectbox(
-        "Seleccionar modelo",
-        available_models,
-        help="Modelos disponibles en tu cuenta de Gemini"
-    )
+    if valid_models:
+        selected_model = st.selectbox(
+            "Seleccionar modelo",
+            valid_models,
+            help="Modelos Gemini disponibles que soportan generación de texto"
+        )
+    else:
+        selected_model = "gemini-1.5-pro"
+        st.warning("⚠️ No se encontraron modelos disponibles")
     
     temperature = st.slider(
         "🌡️ Temperatura",
@@ -206,7 +211,7 @@ with st.sidebar:
         max_value=0.5,
         value=0.1,
         step=0.05,
-        help="0.0 = Máxima fidelidad a la fuente | 0.5 = Más creativo pero menos fiel"
+        help="0.0 = Máxima fidelidad a la fuente | 0.5 = Más creativo"
     )
     
     st.divider()
@@ -217,71 +222,44 @@ with st.sidebar:
     **Prompt**: {'✅ Cargado' if system_prompt else '❌ No cargado'}
     **Modelo**: {selected_model}
     **Temperatura**: {temperature}
-    **Token limit**: 8192
-    **Versión**: VERSION PREVIA — DRAFT
-    **Modelos disponibles**: {len(available_models)}
+    **Modelos disponibles**: {len(valid_models)}
     """)
     
-    st.divider()
-    
-    # Ayuda
-    with st.expander("📖 Ayuda rápida"):
-        st.markdown("""
-        **¿Cómo usar?**
-        1. Ingresa tu HU o documento
-        2. Configura API Key
-        3. Selecciona un modelo disponible
-        4. Haz clic en "Generar"
-        5. Descarga Excel y PDF
-        
-        **Modelos comunes:**
-        - `gemini-1.5-pro`: Más preciso
-        - `gemini-1.5-flash`: Más rápido
-        - `gemini-pro`: Versión estable
-        """)
+    if valid_models:
+        with st.expander("📋 Modelos disponibles"):
+            for m in valid_models:
+                st.write(f"• {m}")
 
 # ============================================
-# TABS - ENTRADA DE DATOS
+# SECCIÓN PRINCIPAL - SOLO CARGA DE ARCHIVOS
 # ============================================
 
-tab1, tab2, tab3 = st.tabs(["📝 Texto Manual", "📁 Carga de Archivo", "📋 Ejemplos"])
+st.subheader("📁 Carga de Documento")
+
+st.markdown("""
+<div class="upload-section">
+    <p style="font-size: 1.2rem; margin-bottom: 1rem;">
+        📄 Arrastra o selecciona un archivo con la información fuente
+    </p>
+    <p style="color: #6c757d; font-size: 0.9rem;">
+        Formatos soportados: <strong>TXT, MD, PDF, DOCX</strong>
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+uploaded_file = st.file_uploader(
+    "Selecciona un archivo",
+    type=['txt', 'md', 'pdf', 'docx'],
+    label_visibility="collapsed"
+)
 
 source_text = ""
 
-with tab1:
-    source_text = st.text_area(
-        "📝 Ingrese la información fuente:",
-        height=350,
-        value=st.session_state.source_content if st.session_state.source_content else "",
-        placeholder="""Ejemplo de entrada:
-
-HISTORIA DE USUARIO:
-Como usuario registrado del sistema de Autos Colectivos
-Quiero iniciar sesión en la aplicación móvil
-Para acceder a mis viajes y realizar reservas
-
-CRITERIOS DE ACEPTACIÓN:
-1. El sistema debe mostrar campos para usuario y contraseña
-2. Debe validar que el usuario existe en la base de datos
-3. La contraseña debe ser validada con hash SHA-256
-4. Tras login exitoso, mostrar dashboard principal
-5. Si falla, mostrar mensaje de error "Credenciales inválidas"
-        """
-    )
-    if source_text:
-        st.session_state.source_content = source_text
-
-with tab2:
-    uploaded_file = st.file_uploader(
-        "📂 Cargue un archivo",
-        type=['txt', 'md', 'pdf', 'docx'],
-        help="Formatos soportados: TXT, MD, PDF, DOCX"
-    )
-    
-    if uploaded_file:
-        try:
-            file_extension = uploaded_file.name.split('.')[-1].lower()
-            
+if uploaded_file:
+    try:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        with st.spinner(f"⏳ Procesando {uploaded_file.name}..."):
             if file_extension in ['txt', 'md']:
                 file_content = uploaded_file.read().decode('utf-8')
                 source_text = file_content
@@ -317,103 +295,42 @@ with tab2:
                     st.error("❌ Para procesar DOCX: pip install python-docx")
                 except Exception as e:
                     st.error(f"❌ Error al procesar DOCX: {str(e)}")
+        
+        # Mostrar preview
+        with st.expander("📄 Vista previa del contenido", expanded=True):
+            st.text_area(
+                "Contenido del archivo:",
+                file_content[:3000],
+                height=200,
+                disabled=True
+            )
+            if len(file_content) > 3000:
+                st.caption(f"... y {len(file_content) - 3000} caracteres más")
             
-            with st.expander("📄 Vista previa del contenido"):
-                st.text_area("Contenido:", file_content[:2000], height=200, disabled=True)
-                if len(file_content) > 2000:
-                    st.caption(f"... y {len(file_content) - 2000} caracteres más")
-                    
-        except Exception as e:
-            st.error(f"❌ Error al procesar el archivo: {str(e)}")
+            # Métricas
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📝 Caracteres", len(file_content))
+            with col2:
+                st.metric("📄 Líneas", len(file_content.split('\n')))
+            with col3:
+                st.metric("💬 Palabras", len(file_content.split()))
+        
+    except Exception as e:
+        st.error(f"❌ Error al procesar el archivo: {str(e)}")
 
-with tab3:
-    st.subheader("📋 Ejemplos de entrada")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.expander("🔐 Ejemplo: Login", expanded=False):
-            st.code("""
-HISTORIA DE USUARIO:
-Como usuario registrado
-Quiero iniciar sesión en el sistema
-Para acceder a mis datos
-
-CRITERIOS DE ACEPTACIÓN:
-1. Mostrar campos usuario y contraseña
-2. Validar credenciales contra BD
-3. Tras login exitoso: dashboard
-4. Si falla: mensaje "Credenciales inválidas"
-5. Máximo 3 intentos
-            """)
-            if st.button("📥 Cargar Ejemplo Login", use_container_width=True):
-                st.session_state.source_content = """HISTORIA DE USUARIO:
-Como usuario registrado
-Quiero iniciar sesión en el sistema
-Para acceder a mis datos
-
-CRITERIOS DE ACEPTACIÓN:
-1. Mostrar campos usuario y contraseña
-2. Validar credenciales contra BD
-3. Tras login exitoso: dashboard
-4. Si falla: mensaje "Credenciales inválidas"
-5. Máximo 3 intentos"""
-                st.success("✅ Ejemplo cargado en la pestaña 'Texto Manual'")
-                st.rerun()
-    
-    with col2:
-        with st.expander("📝 Ejemplo: Registro", expanded=False):
-            st.code("""
-CASO DE USO: Registrar Usuario
-ACTOR: Usuario no registrado
-
-FLUJO PRINCIPAL:
-1. Acceder a formulario de registro
-2. Completar: Nombre, Email, Teléfono, Contraseña
-3. Aceptar términos y condiciones
-4. Presionar "Registrar"
-5. Sistema valida email único
-6. Sistema crea usuario estado "Pendiente"
-7. Mostrar mensaje "Registro exitoso"
-
-FLUJO ALTERNATIVO:
-5a. Email ya registrado
-    5a1. Mostrar "Email ya registrado"
-            """)
-            if st.button("📥 Cargar Ejemplo Registro", use_container_width=True):
-                st.session_state.source_content = """CASO DE USO: Registrar Usuario
-ACTOR: Usuario no registrado
-
-FLUJO PRINCIPAL:
-1. Acceder a formulario de registro
-2. Completar: Nombre, Email, Teléfono, Contraseña
-3. Aceptar términos y condiciones
-4. Presionar "Registrar"
-5. Sistema valida email único
-6. Sistema crea usuario estado "Pendiente"
-7. Mostrar mensaje "Registro exitoso"
-
-FLUJO ALTERNATIVO:
-5a. Email ya registrado
-    5a1. Mostrar "Email ya registrado" """
-                st.success("✅ Ejemplo cargado en la pestaña 'Texto Manual'")
-                st.rerun()
-
-# ============================================
-# MÉTRICAS DE ENTRADA
-# ============================================
-
-if source_text or st.session_state.source_content:
-    text_to_measure = source_text or st.session_state.source_content
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📝 Caracteres", len(text_to_measure))
-    with col2:
-        st.metric("📄 Líneas", len(text_to_measure.split('\n')))
-    with col3:
-        st.metric("💬 Palabras", len(text_to_measure.split()))
-    with col4:
-        st.metric("📋 Párrafos", len([p for p in text_to_measure.split('\n\n') if p.strip()]))
+# Si no hay archivo, mostrar alternativa de texto manual
+if not uploaded_file and not st.session_state.source_content:
+    st.info("💡 También puedes ingresar texto manualmente en el área inferior")
+    source_text = st.text_area(
+        "✏️ O ingresa el texto manualmente:",
+        height=200,
+        placeholder="Pega aquí tu Historia de Usuario, casos de uso o documentación..."
+    )
+    if source_text:
+        st.session_state.source_content = source_text
+elif not uploaded_file and st.session_state.source_content:
+    source_text = st.session_state.source_content
 
 # ============================================
 # FUNCIONES DE PROCESAMIENTO
@@ -433,13 +350,6 @@ def validate_qa_structure(data):
     if len(data["TEST_CASES"]) == 0:
         raise ValueError("No se generaron casos de prueba.")
     
-    # Validar formato de IDs
-    id_pattern = r'^CP-[A-Z]+-[0-9]{5}$'
-    for tc in data["TEST_CASES"]:
-        tc_id = tc.get("ID", "")
-        if tc_id and not re.match(id_pattern, tc_id):
-            st.warning(f"⚠️ ID '{tc_id}' no sigue el formato CP-XXXX-#####")
-    
     return data
 
 def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0.1):
@@ -453,45 +363,39 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
     try:
         genai.configure(api_key=key)
         
-        # Lista de modelos a intentar
-        model_attempts = [
-            model_name,  # El modelo seleccionado
-            'gemini-1.5-pro',
-            'gemini-1.5-flash',
-            'gemini-pro',
-            'gemini-1.0-pro'
-        ]
-        
-        # Eliminar duplicados
-        model_attempts = list(dict.fromkeys(model_attempts))
-        
-        model = None
-        last_error = None
-        
-        for attempt_model in model_attempts:
-            try:
-                st.info(f"🔄 Intentando con modelo: {attempt_model}")
-                model = genai.GenerativeModel(
-                    model_name=attempt_model,
-                    generation_config={
-                        "response_mime_type": "application/json",
-                        "max_output_tokens": 8192,
-                        "temperature": temperature,
-                        "top_p": 0.95
-                    }
-                )
-                # Probar que el modelo funciona
-                # No hacemos una llamada real aquí, solo verificamos que se creó
-                st.success(f"✅ Modelo {attempt_model} disponible")
-                selected_model = attempt_model
+        # Verificar que el modelo soporte generateContent
+        models = genai.list_models()
+        model_found = False
+        for m in models:
+            if m.name.endswith(model_name) and 'generateContent' in m.supported_generation_methods:
+                model_found = True
                 break
-            except Exception as e:
-                last_error = e
-                st.warning(f"⚠️ Modelo {attempt_model} no disponible: {str(e)}")
-                continue
         
-        if model is None:
-            raise ValueError(f"❌ Ningún modelo disponible. Último error: {str(last_error)}")
+        if not model_found:
+            # Buscar un modelo alternativo
+            fallback_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+            for fallback in fallback_models:
+                for m in models:
+                    if m.name.endswith(fallback) and 'generateContent' in m.supported_generation_methods:
+                        st.warning(f"⚠️ Modelo {model_name} no disponible. Usando {fallback}")
+                        model_name = fallback
+                        model_found = True
+                        break
+                if model_found:
+                    break
+        
+        if not model_found:
+            raise ValueError("❌ No se encontró ningún modelo Gemini disponible")
+        
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            generation_config={
+                "response_mime_type": "application/json",
+                "max_output_tokens": 8192,
+                "temperature": temperature,
+                "top_p": 0.95
+            }
+        )
         
         # Limitar tamaño de entrada
         max_source_chars = 30000
@@ -505,7 +409,7 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        status_text.text(f"⏳ Iniciando análisis con {selected_model}...")
+        status_text.text(f"⏳ Iniciando análisis con {model_name}...")
         progress_bar.progress(10)
         
         # Llamada a Gemini
@@ -531,15 +435,13 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
             try:
                 data = json.loads(clean_text)
             except json.JSONDecodeError:
-                # Mostrar parte de la respuesta para debug
                 preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
                 raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
         
-        # Validar estructura
         validated_data = validate_qa_structure(data)
         
         progress_bar.progress(100)
-        status_text.text(f"✅ Procesamiento completado con {selected_model}")
+        status_text.text(f"✅ Procesamiento completado con {model_name}")
         
         time.sleep(0.5)
         progress_bar.empty()
@@ -686,7 +588,6 @@ def create_pdf_v8(data):
         
         styles = getSampleStyleSheet()
         
-        # Estilos personalizados
         title_style = ParagraphStyle(
             'DocTitle', 
             parent=styles['Heading1'], 
@@ -742,7 +643,6 @@ def create_pdf_v8(data):
         story.append(Paragraph(f"Total de Casos de Prueba: {total_cp}", body_style))
         story.append(Paragraph(f"Total de Alertas Generadas: {total_alerts}", body_style))
         
-        # Distribución de escenarios
         scenario_types = {}
         for tc in test_cases:
             stype = tc.get("Scenario Type", "No definido")
@@ -776,22 +676,18 @@ def create_pdf_v8(data):
         story.append(Spacer(1, 5))
         
         for idx, tc in enumerate(test_cases):
-            # ID y Título
             tc_id = sanitize_text_for_pdf(tc.get('ID', f'CP-{idx+1:05d}'))
             tc_title = sanitize_text_for_pdf(tc.get('Title', 'Sin título'))
             story.append(Paragraph(f"<b>{tc_id}</b>", bold_style))
             story.append(Paragraph(f"<b>{tc_title}</b>", body_style))
             
-            # Descripción
             desc = sanitize_text_for_pdf(tc.get('Description', 'Sin descripción'))
             if desc:
                 story.append(Paragraph(f"<b>Descripción:</b> {desc}", body_style))
             
-            # Precondiciones
             preconditions = sanitize_text_for_pdf(tc.get('Preconditions', 'No definidas'))
             story.append(Paragraph(f"<b>Precondiciones:</b> {preconditions}", body_style))
             
-            # Metadatos
             related_uc = sanitize_text_for_pdf(tc.get('Related Use Case', 'No definido'))
             scenario = sanitize_text_for_pdf(tc.get('Scenario', 'No definido'))
             scenario_type = sanitize_text_for_pdf(tc.get('Scenario Type', 'No definido'))
@@ -803,7 +699,6 @@ def create_pdf_v8(data):
             ))
             story.append(Spacer(1, 5))
             
-            # Tabla de Steps
             steps = get_safe_steps(tc)
             if steps:
                 steps_data = [["Step #", "Action", "Expected Value"]]
@@ -829,7 +724,6 @@ def create_pdf_v8(data):
             
             story.append(Spacer(1, 5))
             
-            # Alertas del caso
             case_alerts = tc.get("Alerts", [])
             if case_alerts:
                 story.append(Paragraph("<b>ALERTAS:</b>", bold_style))
@@ -843,12 +737,10 @@ def create_pdf_v8(data):
                     ))
                 story.append(Spacer(1, 5))
             
-            # Separador
             if idx < len(test_cases) - 1:
                 story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
                 story.append(Spacer(1, 5))
         
-        # Pie de página
         story.append(Spacer(1, 20))
         story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
         story.append(Paragraph(
@@ -876,7 +768,7 @@ with col2:
         type="primary",
         use_container_width=True,
         disabled=st.session_state.processing,
-        help="Inicia el análisis de la fuente y genera casos de prueba"
+        help="Inicia el análisis del documento y genera casos de prueba"
     )
 
 # ============================================
@@ -889,7 +781,7 @@ if process_button:
     if not api_key:
         st.error("❌ Por favor ingrese su Gemini API Key o configúrela en Secrets.")
     elif not text_to_process.strip():
-        st.warning("⚠️ Por favor ingrese texto en la fuente de información o cargue un archivo.")
+        st.warning("⚠️ Por favor cargue un archivo o ingrese texto para analizar.")
     else:
         st.session_state.processing = True
         
@@ -903,7 +795,6 @@ if process_button:
             status_text.text("⏳ Iniciando análisis de requisitos...")
             progress_bar.progress(10)
             
-            # Generar casos
             result_json = generate_qa_data(
                 system_prompt, 
                 text_to_process, 
@@ -915,24 +806,20 @@ if process_button:
             progress_bar.progress(50)
             status_text.text("⏳ Generando archivos Excel y PDF...")
             
-            # Generar archivos
             excel_file = create_excel_v8(result_json)
             progress_bar.progress(70)
             
             pdf_file = create_pdf_v8(result_json)
             progress_bar.progress(90)
             
-            # Guardar en sesión
             st.session_state.result_json = result_json
             st.session_state.last_processed = datetime.now()
             
             progress_bar.progress(100)
             status_text.text("✅ Procesamiento completado exitosamente!")
             
-            # Mostrar resultados
             st.success("✅ Análisis QA generado exitosamente.")
             
-            # Métricas
             test_cases = result_json.get("TEST_CASES", [])
             total_steps = sum(len(get_safe_steps(tc)) for tc in test_cases)
             total_alerts = len(result_json.get("ALERTS", []))
@@ -947,7 +834,6 @@ if process_button:
             with col4:
                 st.metric("⏱️ Tiempo", f"{datetime.now() - st.session_state.last_processed if st.session_state.last_processed else 'N/A'}")
             
-            # Resumen rápido
             with st.expander("📊 Resumen de escenarios", expanded=False):
                 scenario_types = {}
                 for tc in test_cases:
@@ -957,7 +843,6 @@ if process_button:
                 for stype, count in scenario_types.items():
                     st.write(f"**{stype}**: {count} casos")
             
-            # Botones de descarga
             col1, col2 = st.columns(2)
             
             with col1:
@@ -978,11 +863,9 @@ if process_button:
                     use_container_width=True
                 )
             
-            # Vista previa JSON
             with st.expander("🔍 Ver JSON generado"):
                 st.json(result_json)
             
-            # Limpiar progreso
             time.sleep(2)
             progress_bar.empty()
             status_text.empty()
@@ -994,9 +877,9 @@ if process_button:
             st.info("""
             💡 **Posibles soluciones:**
             1. Verifica que tu API Key sea válida
-            2. Asegúrate de que la fuente tenga información suficiente
-            3. Prueba con un modelo diferente (Pro vs Flash)
-            4. Reduce la longitud del texto de entrada
+            2. Asegúrate de que el documento tenga información suficiente
+            3. Prueba con un modelo diferente en la barra lateral
+            4. Reduce el tamaño del documento
             5. Revisa que prompt_qa.txt exista
             """)
             
