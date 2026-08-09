@@ -70,6 +70,19 @@ st.markdown("""
         font-size: 0.8rem;
         display: inline-block;
     }
+    .option-card {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #2B6CB0;
+        margin-bottom: 0.5rem;
+    }
+    .fixed-buttons {
+        background: white;
+        padding: 1rem 0;
+        border-top: 2px solid #2B6CB0;
+        margin-top: 1rem;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -106,15 +119,55 @@ if 'quota_exceeded' not in st.session_state:
     st.session_state.quota_exceeded = False
 if 'retry_count' not in st.session_state:
     st.session_state.retry_count = 0
+if 'excel_data' not in st.session_state:
+    st.session_state.excel_data = None
+if 'pdf_data' not in st.session_state:
+    st.session_state.pdf_data = None
+if 'generated_file_name' not in st.session_state:
+    st.session_state.generated_file_name = None
+
+# ============================================
+# CONFIGURACIONES DE FORMATO DE EXCEL
+# ============================================
+
+EXCEL_CONFIGS = {
+    "Siniestros Fasecolda": {
+        "sheet_name": "28443;Fase 3 - RENK170 Siniestr",
+        "base_id": 28454,
+        "base_testpoint": 6552,
+        "configuration": "Default configuration created @ 26/05/2023 15:22:17",
+        "tester": "Isabel Cristina Mejía López",
+        "title_prefix": "CP-ACSF-",
+        "user_default": "Suscriptor Oficina Principal, suscriptor sucursal autos",
+        "steps_with_users": True
+    },
+    "Autos Colectivos": {
+        "sheet_name": "Azure Import",
+        "base_id": 10001,
+        "base_testpoint": 1001,
+        "configuration": "Default configuration",
+        "tester": "",
+        "title_prefix": "CP-AC-",
+        "user_default": "Usuario registrado",
+        "steps_with_users": True
+    },
+    "General QA": {
+        "sheet_name": "Casos de Prueba",
+        "base_id": 20001,
+        "base_testpoint": 2001,
+        "configuration": "",
+        "tester": "",
+        "title_prefix": "CP-",
+        "user_default": "",
+        "steps_with_users": False
+    }
+}
 
 # ============================================
 # MODELO GEMINI 3.6 FLASH (PREDETERMINADO)
 # ============================================
 
-# Modelo por defecto según especificación
 MODEL = "gemini-3.6-flash"
-
-# Modelos alternativos (fallback)
 FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
 
 # ============================================
@@ -231,7 +284,6 @@ def get_default_prompt():
     Los Steps deben tener: Step #, Action, Expected value.
     """
 
-# PROMPT V8 - NO CAMBIAR
 system_prompt = load_system_prompt()
 
 # ============================================
@@ -318,6 +370,28 @@ with st.sidebar:
     else:
         st.info(f"ℹ️ Modelo seleccionado: {selected_model}")
     
+    st.divider()
+    
+    # Configuración de formato de Excel
+    st.subheader("📊 Formato de Excel")
+    
+    selected_config = st.selectbox(
+        "Seleccionar formato",
+        options=list(EXCEL_CONFIGS.keys()),
+        help="Selecciona el formato de Excel según el proyecto"
+    )
+    
+    # Mostrar detalles del formato seleccionado
+    config = EXCEL_CONFIGS[selected_config]
+    st.caption(f"""
+    **Hoja:** {config['sheet_name']}
+    **ID inicial:** {config['base_id']}
+    **Prefijo:** {config['title_prefix']}
+    **Usuario:** {config['user_default'] if config['user_default'] else 'No definido'}
+    """)
+    
+    st.divider()
+    
     # Opciones avanzadas
     with st.expander("⚙️ Opciones avanzadas"):
         temperature = st.slider(
@@ -355,7 +429,7 @@ with st.sidebar:
     **Temperatura**: {temperature}
     **Reintentos**: {max_retries}
     **Max tokens**: 65536
-    **Modelos disponibles**: {len(valid_models)}
+    **Formato**: {selected_config}
     """)
     
     if st.session_state.quota_exceeded:
@@ -468,10 +542,7 @@ elif not uploaded_file and st.session_state.source_content:
 # ============================================
 
 def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, temperature=0.1, max_retries=3, initial_wait=10):
-    """
-    Genera datos QA usando Gemini 3.6 Flash
-    NO CAMBIAR - Mantiene prompt V8, SCHEMA y estructura
-    """
+    """Genera datos QA usando Gemini 3.6 Flash"""
     
     if not key:
         raise ValueError("❌ API Key no configurada")
@@ -479,26 +550,18 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
     if not source_content.strip():
         raise ValueError("❌ Fuente de información vacía")
     
-    # ============================================
-    # CONFIGURACIÓN DEL CLIENTE GEMINI
-    # ============================================
-    
     client = genai.Client(api_key=key)
     
-    # Limitar tamaño de entrada
     max_source_chars = 30000
     if len(source_content) > max_source_chars:
         st.warning(f"⚠️ Contenido de {len(source_content)} caracteres. Truncado a {max_source_chars}.")
         source_content = source_content[:max_source_chars] + "\n... [Contenido truncado]"
     
-    # Preparar el prompt completo (Prompt V8 - NO CAMBIAR)
     full_prompt = f"{prompt_text}\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n{source_content}"
     
-    # Progreso
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Intentar con reintentos
     last_error = None
     wait_time = initial_wait
     
@@ -507,31 +570,24 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
             status_text.text(f"⏳ Intento {attempt + 1} de {max_retries + 1} con {model_name}...")
             progress_bar.progress(10 + (attempt * 20))
             
-            # ============================================
-            # LLAMADA A GEMINI CON LA CONFIGURACIÓN ESPECIFICADA
-            # ============================================
-            
             r = client.models.generate_content(
                 model=model_name,
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema=SCHEMA,      # SCHEMA - NO CAMBIAR
-                    max_output_tokens=65536      # 65536 tokens para respuestas largas
+                    response_schema=SCHEMA,
+                    max_output_tokens=65536
                 )
             )
             
             progress_bar.progress(70)
             status_text.text("⏳ Procesando respuesta...")
             
-            # Obtener el texto de la respuesta
             text = r.text.strip()
             
-            # Intentar parsear el JSON
             try:
                 data = json.loads(text)
             except json.JSONDecodeError as e:
-                # Intentar limpiar la respuesta
                 clean_text = text
                 json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
                 if json_match:
@@ -542,16 +598,13 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
                 try:
                     data = json.loads(clean_text)
                 except json.JSONDecodeError:
-                    # Lanzar error detallado
                     raise RuntimeError(
                         f"✖ Error al parsear JSON. Detalle: {e}. "
                         f"Respuesta: {text[:3000]}"
                     )
             
-            # Validar estructura
             validated_data = validate_qa_structure(data)
             
-            # Éxito - resetear contadores
             st.session_state.quota_exceeded = False
             st.session_state.retry_count = 0
             
@@ -568,7 +621,6 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
             last_error = e
             error_str = str(e)
             
-            # Verificar si es error de cuota (429)
             if '429' in error_str or 'quota' in error_str.lower() or 'rate limit' in error_str.lower():
                 st.session_state.quota_exceeded = True
                 st.session_state.retry_count = attempt + 1
@@ -645,46 +697,36 @@ def get_safe_steps(tc):
     return steps
 
 # ============================================
-# FUNCIÓN PARA GENERAR EXCEL CON ESTRUCTURA ESPECÍFICA
+# FUNCIÓN PARA GENERAR EXCEL CON FORMATO SELECCIONADO
 # ============================================
 
-def create_excel_v8(data):
+def create_excel_v8(data, config_key):
     """
-    Crea Excel con la estructura exacta para Azure Import
-    Basado en el ejemplo: OTE_Siniestros Fasecolda_-- All --_-- All --.xlsx
-    Los pasos deben tener descripciones detalladas similares al ejemplo
+    Crea Excel con la estructura según el formato seleccionado
     """
     try:
         output = io.BytesIO()
-        
-        # ============================================
-        # HOJA 1: AZURE IMPORT - ESTRUCTURA EXACTA
-        # ============================================
-        # Columnas según el ejemplo:
-        # TestCaseId | Title | TestStep | StepAction | StepExpected | TestPointId | Configuration | Tester | Outcome | Comment
-        # ============================================
+        config = EXCEL_CONFIGS[config_key]
         
         azure_rows = []
-        
-        # Generar un ID numérico secuencial para TestCaseId
-        # Empezando desde 28454 como en el ejemplo
-        base_id = 28454
-        
-        # Empezar TestPointId desde 6552
-        base_testpoint = 6552
+        base_id = config["base_id"]
+        base_testpoint = config["base_testpoint"]
+        title_prefix = config["title_prefix"]
+        user_default = config["user_default"]
+        steps_with_users = config["steps_with_users"]
         
         for idx, tc in enumerate(data.get("TEST_CASES", [])):
-            # Extraer el ID del caso (ej: CP-ACSF-00001)
-            case_id = get_safe_text(tc.get("ID", f"CP-ACSF-{idx+1:05d}"))
+            # Extraer el ID del caso
+            case_id = get_safe_text(tc.get("ID", f"{title_prefix}{idx+1:05d}"))
             case_title = get_safe_text(tc.get("Title", f"{case_id} Sin título"))
             steps = get_safe_steps(tc)
+            preconditions = get_safe_text(tc.get("Preconditions", ""))
             
-            # Asignar TestCaseId numérico
             test_case_id = base_id + idx
             test_point_id = f"{base_testpoint + idx}:0"
             
             # ============================================
-            # FILA 1: TÍTULO DEL CASO (TestStep vacío)
+            # FILA 1: TÍTULO DEL CASO
             # ============================================
             azure_rows.append({
                 "TestCaseId": test_case_id,
@@ -693,17 +735,16 @@ def create_excel_v8(data):
                 "StepAction": "",
                 "StepExpected": "",
                 "TestPointId": test_point_id,
-                "Configuration": "Default configuration created @ 26/05/2023 15:22:17",
-                "Tester": "Isabel Cristina Mejía López",
+                "Configuration": config["configuration"],
+                "Tester": config["tester"],
                 "Outcome": "",
                 "Comment": ""
             })
             
             # ============================================
-            # FILAS DE STEPS CON DESCRIPCIONES DETALLADAS
+            # FILAS DE STEPS
             # ============================================
             if not steps:
-                # Si no hay steps, crear una fila con mensaje
                 azure_rows.append({
                     "TestCaseId": "",
                     "Title": "",
@@ -717,16 +758,35 @@ def create_excel_v8(data):
                     "Comment": ""
                 })
             else:
-                # Crear una fila por cada step con descripciones detalladas
                 for step_idx, step in enumerate(steps):
                     step_num = step.get("Step #", step_idx + 1)
                     step_action = get_safe_text(step.get("Action", ""))
                     step_expected = get_safe_text(step.get("Expected value", ""))
                     
-                    # Enriquecer descripciones si son muy cortas
-                    if len(step_action) < 10 and step_action:
+                    # ============================================
+                    # ENRIQUECER STEPS CON USUARIOS
+                    # ============================================
+                    if steps_with_users and user_default:
+                        # Buscar palabras clave de usuario
+                        user_keywords = ["usuario", "suscriptor", "admin", "operador", "consultor", "validador"]
+                        has_user = any(keyword in step_action.lower() for keyword in user_keywords)
+                        
+                        if not has_user and len(step_action) > 0:
+                            # Si no tiene usuario y hay precondiciones, extraer usuario
+                            if "usuario" in preconditions.lower():
+                                user_match = re.search(r'(usuario|suscriptor|admin|operador)\s+([^,\n]+)', preconditions, re.IGNORECASE)
+                                if user_match:
+                                    user_type = user_match.group(0).strip()
+                                    step_action = f"{step_action} con {user_type}"
+                            else:
+                                # Usar usuario por defecto de la configuración
+                                if "ingresar" in step_action.lower() or "login" in step_action.lower() or "acceder" in step_action.lower():
+                                    step_action = f"Ingresar con el usuario y contraseña de {user_default}. {step_action}"
+                    
+                    # Enriquecer descripciones cortas
+                    if len(step_action) < 15 and step_action:
                         step_action = f"{step_action}. Verificar comportamiento esperado."
-                    if len(step_expected) < 10 and step_expected:
+                    if len(step_expected) < 15 and step_expected:
                         step_expected = f"{step_expected}. Validar que el sistema responda correctamente."
                     
                     azure_rows.append({
@@ -754,9 +814,13 @@ def create_excel_v8(data):
             alerts_str = " | ".join([f"{a.get('Alert', '')}: {a.get('Reason', '')}" 
                                    for a in alerts_list if a.get('Alert') and a.get('Reason')]) if alerts_list else "Sin Alertas"
             
-            # Obtener descripción y escenario para enriquecer la matriz
             description = get_safe_text(tc.get("Description", ""))
             scenario = get_safe_text(tc.get("Scenario", ""))
+            
+            # Enriquecer escenario con usuario
+            if steps_with_users and user_default and scenario:
+                if "usuario" not in scenario.lower():
+                    scenario = f"{scenario} - {user_default}"
             
             matriz_rows.append({
                 "Requirement / Use Case": get_safe_text(tc.get("Related Use Case", "")),
@@ -771,18 +835,15 @@ def create_excel_v8(data):
         df_matriz = pd.DataFrame(matriz_rows)
         
         # ============================================
-        # GUARDAR EXCEL CON AMBAS HOJAS
+        # GUARDAR EXCEL
         # ============================================
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Usar el nombre de la hoja exacto del ejemplo
-            df_azure.to_excel(writer, sheet_name="28443;Fase 3 - RENK170 Siniestr", index=False)
+            df_azure.to_excel(writer, sheet_name=config["sheet_name"], index=False)
             df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
             
-            # Ajustar anchos de columnas
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
-                # Ajustar automáticamente el ancho de las columnas
                 for column in worksheet.columns:
                     max_length = 0
                     column_letter = column[0].column_letter
@@ -792,8 +853,7 @@ def create_excel_v8(data):
                                 max_length = len(str(cell.value))
                         except:
                             pass
-                    # Dar un poco más de ancho a las columnas de texto largo
-                    if column_letter in ['D', 'E']:  # StepAction y StepExpected
+                    if column_letter in ['D', 'E']:
                         adjusted_width = min(max_length + 5, 80)
                     else:
                         adjusted_width = min(max_length + 2, 50)
@@ -888,247 +948,3 @@ def create_pdf_v8(data):
         story.append(Spacer(1, 20))
         
         test_cases = data.get("TEST_CASES", [])
-        total_cp = len(test_cases)
-        total_alerts = len(data.get("ALERTS", []))
-        
-        story.append(Paragraph("RESUMEN GENERAL", h2_style))
-        story.append(Paragraph(f"Total de Casos de Prueba: {total_cp}", body_style))
-        story.append(Paragraph(f"Total de Alertas Generadas: {total_alerts}", body_style))
-        
-        scenario_types = {}
-        for tc in test_cases:
-            stype = tc.get("Scenario Type", "No definido")
-            scenario_types[stype] = scenario_types.get(stype, 0) + 1
-        
-        if scenario_types:
-            story.append(Spacer(1, 5))
-            story.append(Paragraph("Distribución de Escenarios:", body_style))
-            for stype, count in scenario_types.items():
-                story.append(Paragraph(f"• {stype}: {count} casos", body_style))
-        
-        story.append(Spacer(1, 10))
-        
-        alerts = data.get("ALERTS", [])
-        if alerts:
-            story.append(Paragraph("ALERTAS GENERALES", h2_style))
-            for alert in alerts:
-                alert_text = sanitize_text_for_pdf(alert.get("Alert", ""))
-                reason_text = sanitize_text_for_pdf(alert.get("Reason", ""))
-                validation_text = sanitize_text_for_pdf(alert.get("Validation Required", ""))
-                story.append(Paragraph(f"• <b>{alert_text}</b>: {reason_text}", body_style))
-                if validation_text:
-                    story.append(Paragraph(f"  <i>Validación: {validation_text}</i>", body_style))
-            story.append(Spacer(1, 10))
-            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
-            story.append(Spacer(1, 10))
-        
-        story.append(Paragraph("CASOS DE PRUEBA", h2_style))
-        story.append(Spacer(1, 5))
-        
-        for idx, tc in enumerate(test_cases):
-            tc_id = sanitize_text_for_pdf(tc.get('ID', f'CP-{idx+1:05d}'))
-            tc_title = sanitize_text_for_pdf(tc.get('Title', 'Sin título'))
-            story.append(Paragraph(f"<b>{tc_id}</b>", bold_style))
-            story.append(Paragraph(f"<b>{tc_title}</b>", body_style))
-            
-            desc = sanitize_text_for_pdf(tc.get('Description', 'Sin descripción'))
-            if desc:
-                story.append(Paragraph(f"<b>Descripción:</b> {desc}", body_style))
-            
-            preconditions = sanitize_text_for_pdf(tc.get('Preconditions', 'No definidas'))
-            story.append(Paragraph(f"<b>Precondiciones:</b> {preconditions}", body_style))
-            
-            related_uc = sanitize_text_for_pdf(tc.get('Related Use Case', 'No definido'))
-            scenario = sanitize_text_for_pdf(tc.get('Scenario', 'No definido'))
-            scenario_type = sanitize_text_for_pdf(tc.get('Scenario Type', 'No definido'))
-            effort = sanitize_text_for_pdf(tc.get('Effort', 'No definido'))
-            
-            story.append(Paragraph(
-                f"<b>Requisito:</b> {related_uc} | <b>Escenario:</b> {scenario} ({scenario_type}) | <b>Effort:</b> {effort}",
-                body_style
-            ))
-            story.append(Spacer(1, 5))
-            
-            steps = get_safe_steps(tc)
-            if steps:
-                steps_data = [["Step #", "Action", "Expected Value"]]
-                for step in steps:
-                    action = sanitize_text_for_pdf(step.get("Action", "No definida"))
-                    expected = sanitize_text_for_pdf(step.get("Expected value", "No definido"))
-                    step_num = step.get("Step #", len(steps_data))
-                    steps_data.append([str(step_num), action, expected])
-                
-                t_steps = Table(steps_data, colWidths=[40, 220, 260])
-                t_steps.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#EDF2F7')),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#2D3748')),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,-1), 8),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ('PADDING', (0,0), (-1,-1), 4),
-                ]))
-                story.append(t_steps)
-            else:
-                story.append(Paragraph("<i>No se definieron steps para este caso</i>", body_style))
-            
-            story.append(Spacer(1, 5))
-            
-            case_alerts = tc.get("Alerts", [])
-            if case_alerts:
-                story.append(Paragraph("<b>ALERTAS:</b>", bold_style))
-                for alert in case_alerts:
-                    alert_text = sanitize_text_for_pdf(alert.get('Alert', ''))
-                    reason = sanitize_text_for_pdf(alert.get('Reason', ''))
-                    validation = sanitize_text_for_pdf(alert.get('Validation Required', ''))
-                    story.append(Paragraph(
-                        f"• <b>{alert_text}</b>: {reason}" + (f" <i>({validation})</i>" if validation else ""),
-                        body_style
-                    ))
-                story.append(Spacer(1, 5))
-            
-            if idx < len(test_cases) - 1:
-                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
-                story.append(Spacer(1, 5))
-        
-        story.append(Spacer(1, 20))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
-        story.append(Paragraph(
-            f"VERSION PREVIA — DRAFT - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            small_style
-        ))
-        story.append(Paragraph("Documento generado automáticamente. Requiere revisión y validación por equipo funcional.", small_style))
-        
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
-        
-    except Exception as e:
-        logger.error(f"Error en create_pdf_v8: {str(e)}")
-        raise
-
-# ============================================
-# BOTÓN DE PROCESAMIENTO
-# ============================================
-
-col1, col2, col3 = st.columns([2, 1.5, 2])
-with col2:
-    process_button = st.button(
-        "🚀 Generar Casos de Prueba",
-        type="primary",
-        use_container_width=True,
-        disabled=st.session_state.processing,
-        help="Inicia el análisis del documento y genera casos de prueba"
-    )
-
-# ============================================
-# PROCESAR
-# ============================================
-
-if process_button:
-    text_to_process = source_text or st.session_state.source_content
-    
-    if not api_key:
-        st.error("❌ Por favor ingrese su Gemini API Key o configúrela en Secrets.")
-    elif not text_to_process.strip():
-        st.warning("⚠️ Por favor cargue un archivo o ingrese texto para analizar.")
-    else:
-        st.session_state.processing = True
-        
-        try:
-            result_json = generate_qa_data_with_gemini(
-                system_prompt,
-                text_to_process,
-                api_key,
-                selected_model,
-                temperature,
-                max_retries,
-                wait_time
-            )
-            
-            # Éxito - mostrar resultados
-            st.success("✅ Análisis QA generado exitosamente con Gemini 3.6 Flash")
-            
-            # Generar archivos
-            with st.spinner("⏳ Generando archivos Excel y PDF..."):
-                excel_file = create_excel_v8(result_json)
-                pdf_file = create_pdf_v8(result_json)
-            
-            # Guardar en sesión
-            st.session_state.result_json = result_json
-            st.session_state.last_processed = datetime.now()
-            
-            # Métricas
-            test_cases = result_json.get("TEST_CASES", [])
-            total_steps = sum(len(get_safe_steps(tc)) for tc in test_cases)
-            total_alerts = len(result_json.get("ALERTS", []))
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📋 Casos", len(test_cases))
-            with col2:
-                st.metric("📝 Steps", total_steps)
-            with col3:
-                st.metric("⚠️ Alertas", total_alerts)
-            with col4:
-                st.metric("⏱️ Tiempo", f"{datetime.now() - st.session_state.last_processed if st.session_state.last_processed else 'N/A'}")
-            
-            with st.expander("📊 Resumen de escenarios", expanded=False):
-                scenario_types = {}
-                for tc in test_cases:
-                    stype = tc.get("Scenario Type", "No definido")
-                    scenario_types[stype] = scenario_types.get(stype, 0) + 1
-                
-                for stype, count in scenario_types.items():
-                    st.write(f"**{stype}**: {count} casos")
-            
-            # Botones de descarga
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.download_button(
-                    label="📥 Descargar Excel (Azure Import + Matriz QA)",
-                    data=excel_file,
-                    file_name=f"QA_Casos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-                
-            with col2:
-                st.download_button(
-                    label="📄 Descargar PDF Draft Report",
-                    data=pdf_file,
-                    file_name=f"QA_Reporte_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-            
-            with st.expander("🔍 Ver JSON generado"):
-                st.json(result_json)
-            
-        except Exception as e:
-            st.error(f"❌ Error al procesar: {str(e)}")
-            logger.error(f"Error: {str(e)}")
-            
-            st.info("""
-            💡 **Posibles soluciones:**
-            1. Espera unos minutos y vuelve a intentar (cuota de Gemini)
-            2. Cambia a un modelo diferente en la barra lateral
-            3. Reduce el tamaño del documento
-            4. Verifica que tu API Key sea válida
-            5. Modelo recomendado: gemini-3.6-flash
-            """)
-            
-        finally:
-            st.session_state.processing = False
-
-# ============================================
-# FOOTER
-# ============================================
-
-st.divider()
-st.caption("""
-**Agente QA V8** — VERSION PREVIA — DRAFT | 
-Desarrollado con Streamlit y Google Gemini 3.6 Flash | 
-Principios: Trazabilidad + Fidelidad + No Invención
-""")
