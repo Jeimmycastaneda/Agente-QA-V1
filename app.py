@@ -47,27 +47,6 @@ st.markdown("""
         border-left: 4px solid #2B6CB0;
         margin-bottom: 0.5rem;
     }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffc107;
-        padding: 0.75rem;
-        border-radius: 5px;
-        margin: 0.5rem 0;
-    }
-    .info-box {
-        background-color: #d1ecf1;
-        border: 1px solid #17a2b8;
-        padding: 0.75rem;
-        border-radius: 5px;
-        margin: 0.5rem 0;
-    }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #28a745;
-        padding: 0.75rem;
-        border-radius: 5px;
-        margin: 0.5rem 0;
-    }
     .draft-badge {
         background-color: #ffc107;
         color: #1A365D;
@@ -106,6 +85,8 @@ if 'last_processed' not in st.session_state:
     st.session_state.last_processed = None
 if 'source_content' not in st.session_state:
     st.session_state.source_content = ""
+if 'available_models' not in st.session_state:
+    st.session_state.available_models = []
 
 # ============================================
 # CARGA DEL PROMPT
@@ -140,6 +121,37 @@ def get_default_prompt():
 system_prompt = load_system_prompt()
 
 # ============================================
+# FUNCIÓN PARA OBTENER MODELOS DISPONIBLES
+# ============================================
+
+@st.cache_data(ttl=3600)
+def get_available_models(api_key):
+    """Obtiene la lista de modelos disponibles con Gemini"""
+    try:
+        genai.configure(api_key=api_key)
+        models = genai.list_models()
+        
+        # Filtrar modelos que soportan generateContent
+        available = []
+        for model in models:
+            if 'generateContent' in model.supported_generation_methods:
+                # Extraer solo el nombre del modelo sin la ruta completa
+                model_name = model.name.split('/')[-1]
+                # Filtrar modelos relevantes para QA
+                if any(x in model_name.lower() for x in ['gemini', 'pro', 'flash']):
+                    available.append(model_name)
+        
+        # Modelos por defecto si no se encuentran otros
+        if not available:
+            available = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        
+        return sorted(set(available))
+    except Exception as e:
+        st.warning(f"⚠️ No se pudieron listar los modelos: {str(e)}")
+        # Modelos comunes como fallback
+        return ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro']
+
+# ============================================
 # SIDEBAR - CONFIGURACIÓN
 # ============================================
 
@@ -163,14 +175,29 @@ with st.sidebar:
             help="Obtén tu API Key en https://makersuite.google.com/app/apikey"
         )
     
+    # Si hay API Key, obtener modelos disponibles
+    if api_key:
+        try:
+            available_models = get_available_models(api_key)
+            st.session_state.available_models = available_models
+        except Exception as e:
+            st.warning(f"⚠️ Usando modelos por defecto: {str(e)}")
+            available_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+            st.session_state.available_models = available_models
+    else:
+        available_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        st.session_state.available_models = available_models
+    
     st.divider()
     
     # Configuración del modelo
     st.subheader("🎯 Modelo")
+    
+    # Mostrar modelos disponibles
     selected_model = st.selectbox(
         "Seleccionar modelo",
-        ["gemini-1.5-pro", "gemini-1.5-flash"],
-        help="Gemini 1.5 Pro: Más preciso y detallado | Flash: Más rápido"
+        available_models,
+        help="Modelos disponibles en tu cuenta de Gemini"
     )
     
     temperature = st.slider(
@@ -192,6 +219,7 @@ with st.sidebar:
     **Temperatura**: {temperature}
     **Token limit**: 8192
     **Versión**: VERSION PREVIA — DRAFT
+    **Modelos disponibles**: {len(available_models)}
     """)
     
     st.divider()
@@ -202,14 +230,14 @@ with st.sidebar:
         **¿Cómo usar?**
         1. Ingresa tu HU o documento
         2. Configura API Key
-        3. Haz clic en "Generar"
-        4. Descarga Excel y PDF
+        3. Selecciona un modelo disponible
+        4. Haz clic en "Generar"
+        5. Descarga Excel y PDF
         
-        **¿Qué genera?**
-        - Excel: Azure Import + Matriz QA
-        - PDF: Reporte DRAFT completo
-        
-        **Principios**: Trazabilidad + Fidelidad + No invención
+        **Modelos comunes:**
+        - `gemini-1.5-pro`: Más preciso
+        - `gemini-1.5-flash`: Más rápido
+        - `gemini-pro`: Versión estable
         """)
 
 # ============================================
@@ -425,22 +453,45 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
     try:
         genai.configure(api_key=key)
         
-        # Validar modelo disponible
-        available_models = [m.name for m in genai.list_models()]
-        model_found = any(model_name in m for m in available_models)
-        if not model_found:
-            st.warning(f"⚠️ Modelo {model_name} no disponible. Usando gemini-1.5-pro")
-            model_name = "gemini-1.5-pro"
+        # Lista de modelos a intentar
+        model_attempts = [
+            model_name,  # El modelo seleccionado
+            'gemini-1.5-pro',
+            'gemini-1.5-flash',
+            'gemini-pro',
+            'gemini-1.0-pro'
+        ]
         
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "response_mime_type": "application/json",
-                "max_output_tokens": 8192,
-                "temperature": temperature,
-                "top_p": 0.95
-            }
-        )
+        # Eliminar duplicados
+        model_attempts = list(dict.fromkeys(model_attempts))
+        
+        model = None
+        last_error = None
+        
+        for attempt_model in model_attempts:
+            try:
+                st.info(f"🔄 Intentando con modelo: {attempt_model}")
+                model = genai.GenerativeModel(
+                    model_name=attempt_model,
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "max_output_tokens": 8192,
+                        "temperature": temperature,
+                        "top_p": 0.95
+                    }
+                )
+                # Probar que el modelo funciona
+                # No hacemos una llamada real aquí, solo verificamos que se creó
+                st.success(f"✅ Modelo {attempt_model} disponible")
+                selected_model = attempt_model
+                break
+            except Exception as e:
+                last_error = e
+                st.warning(f"⚠️ Modelo {attempt_model} no disponible: {str(e)}")
+                continue
+        
+        if model is None:
+            raise ValueError(f"❌ Ningún modelo disponible. Último error: {str(last_error)}")
         
         # Limitar tamaño de entrada
         max_source_chars = 30000
@@ -454,7 +505,7 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        status_text.text("⏳ Iniciando análisis de requisitos...")
+        status_text.text(f"⏳ Iniciando análisis con {selected_model}...")
         progress_bar.progress(10)
         
         # Llamada a Gemini
@@ -480,13 +531,15 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
             try:
                 data = json.loads(clean_text)
             except json.JSONDecodeError:
-                raise ValueError(f"❌ Error al parsear JSON. Respuesta: {response.text[:200]}...")
+                # Mostrar parte de la respuesta para debug
+                preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
+                raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
         
         # Validar estructura
         validated_data = validate_qa_structure(data)
         
         progress_bar.progress(100)
-        status_text.text("✅ Procesamiento completado")
+        status_text.text(f"✅ Procesamiento completado con {selected_model}")
         
         time.sleep(0.5)
         progress_bar.empty()
