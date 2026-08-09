@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import google.generativeai as genai
+from google.generativeai import types
 
 # ============================================
 # CONFIGURACIÓN INICIAL
@@ -63,6 +64,15 @@ st.markdown("""
         border-radius: 5px;
         margin: 1rem 0;
     }
+    .model-badge {
+        background-color: #28a745;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -76,6 +86,7 @@ st.markdown("""
         <p style="margin: 0; opacity: 0.9;">
             <span class="draft-badge">VERSION PREVIA — DRAFT</span>
             &nbsp; Análisis de documentos y generación de casos de prueba para QA
+            <span class="model-badge" style="margin-left: 10px;">Gemini 3.6 Flash</span>
         </p>
     </div>
 """, unsafe_allow_html=True)
@@ -100,44 +111,107 @@ if 'retry_count' not in st.session_state:
     st.session_state.retry_count = 0
 
 # ============================================
-# MODELOS GEMINI ACTUALIZADOS (2026)
+# MODELO GEMINI 3.6 FLASH (PREDETERMINADO)
 # ============================================
 
-# Modelos Gemini actualizados según documentación oficial
-# Ref: https://ai.google.dev/gemini-api/docs/models
-GEMINI_MODELS = {
-    'gemini-2.5-flash': {
-        'name': 'Gemini 2.5 Flash',
-        'description': 'Modelo rápido y eficiente, ideal para QA',
-        'max_tokens': 8192
+# Modelo por defecto según especificación
+DEFAULT_MODEL = "gemini-3.6-flash"
+
+# Modelos alternativos (fallback)
+FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
+
+# ============================================
+# ESQUEMA JSON PARA LA RESPUESTA
+# ============================================
+
+# SCHEMA - NO CAMBIAR
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "TEST_CASES": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ID": {"type": "string"},
+                    "Title": {"type": "string"},
+                    "Description": {"type": "string"},
+                    "Expected Result": {"type": "string"},
+                    "Preconditions": {"type": "string"},
+                    "Product": {"type": "string"},
+                    "Module": {"type": "string"},
+                    "Related Use Case": {"type": "string"},
+                    "Criterion": {"type": "string"},
+                    "Scenario": {"type": "string"},
+                    "Scenario Type": {"type": "string"},
+                    "Effort": {"type": "string"},
+                    "Steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "Step #": {"type": "integer"},
+                                "Action": {"type": "string"},
+                                "Expected value": {"type": "string"}
+                            },
+                            "required": ["Step #", "Action", "Expected value"]
+                        }
+                    },
+                    "Alerts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "Alert": {"type": "string"},
+                                "Reason": {"type": "string"},
+                                "Validation Required": {"type": "string"}
+                            },
+                            "required": ["Alert", "Reason", "Validation Required"]
+                        }
+                    }
+                },
+                "required": ["ID", "Title", "Description", "Preconditions", "Steps"]
+            }
+        },
+        "ALERTS": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Alert": {"type": "string"},
+                    "Reason": {"type": "string"},
+                    "Validation Required": {"type": "string"}
+                },
+                "required": ["Alert", "Reason", "Validation Required"]
+            }
+        },
+        "COVERAGE": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Requirement / Use Case": {"type": "string"},
+                    "Criterion": {"type": "string"},
+                    "Scenario": {"type": "string"},
+                    "Test Case": {"type": "string"},
+                    "Validation Method": {"type": "string"},
+                    "Coverage": {"type": "string"},
+                    "Alerts": {"type": "string"}
+                },
+                "required": ["Requirement / Use Case", "Criterion", "Scenario", "Test Case"]
+            }
+        }
     },
-    'gemini-2.5-pro': {
-        'name': 'Gemini 2.5 Pro',
-        'description': 'Modelo más preciso y detallado',
-        'max_tokens': 8192
-    },
-    'gemini-1.5-flash': {
-        'name': 'Gemini 1.5 Flash',
-        'description': 'Modelo rápido con buena calidad',
-        'max_tokens': 8192
-    },
-    'gemini-1.5-pro': {
-        'name': 'Gemini 1.5 Pro',
-        'description': 'Modelo preciso y estable',
-        'max_tokens': 8192
-    }
+    "required": ["TEST_CASES", "ALERTS", "COVERAGE"]
 }
 
-# Modelos por defecto en orden de preferencia
-DEFAULT_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
-
 # ============================================
-# CARGA DEL PROMPT
+# CARGA DEL PROMPT V8 - NO CAMBIAR
 # ============================================
 
 @st.cache_data(ttl=3600)
 def load_system_prompt():
-    """Carga el prompt del sistema desde archivo"""
+    """Carga el prompt V8 desde archivo - NO CAMBIAR"""
     prompt_path = "prompt_qa.txt"
     if os.path.exists(prompt_path):
         try:
@@ -154,13 +228,14 @@ def load_system_prompt():
         return get_default_prompt()
 
 def get_default_prompt():
-    """Prompt por defecto en caso de error"""
+    """Prompt por defecto en caso de error - NO CAMBIAR"""
     return """Eres un agente especializado en análisis de Historias de Usuario y generación de casos de prueba para QA.
     Genera una estructura JSON con TEST_CASES, ALERTS y COVERAGE.
     Cada caso de prueba debe tener: ID, Title, Description, Preconditions, Steps, Alerts.
     Los Steps deben tener: Step #, Action, Expected value.
     """
 
+# PROMPT V8 - NO CAMBIAR
 system_prompt = load_system_prompt()
 
 # ============================================
@@ -169,7 +244,7 @@ system_prompt = load_system_prompt()
 
 @st.cache_data(ttl=3600)
 def get_valid_models(api_key):
-    """Obtiene los modelos Gemini disponibles que soportan generateContent"""
+    """Obtiene los modelos Gemini disponibles"""
     try:
         genai.configure(api_key=api_key)
         models = genai.list_models()
@@ -178,32 +253,23 @@ def get_valid_models(api_key):
         for model in models:
             if 'generateContent' in model.supported_generation_methods:
                 model_name = model.name.split('/')[-1]
-                # Verificar que sea un modelo Gemini válido
                 if 'gemini' in model_name.lower():
-                    # Excluir modelos obsoletos
+                    # Excluir modelos 2.0 obsoletos
                     if '2.0' not in model_name.lower():
                         valid_models.append(model_name)
         
-        # Si no se encontraron modelos, usar los defaults
+        # Asegurar que gemini-3.6-flash esté en la lista
+        if DEFAULT_MODEL not in valid_models:
+            valid_models.insert(0, DEFAULT_MODEL)
+        
         if not valid_models:
-            valid_models = DEFAULT_MODELS.copy()
+            valid_models = FALLBACK_MODELS.copy()
         
-        # Ordenar por preferencia
-        ordered_models = []
-        for default in DEFAULT_MODELS:
-            if default in valid_models:
-                ordered_models.append(default)
-        
-        # Agregar cualquier otro modelo no incluido en defaults
-        for model in valid_models:
-            if model not in ordered_models:
-                ordered_models.append(model)
-        
-        return ordered_models
+        return sorted(set(valid_models))
         
     except Exception as e:
         st.warning(f"⚠️ No se pudieron listar los modelos: {str(e)}")
-        return DEFAULT_MODELS.copy()
+        return FALLBACK_MODELS.copy()
 
 # ============================================
 # SIDEBAR - CONFIGURACIÓN
@@ -231,10 +297,10 @@ with st.sidebar:
             valid_models = get_valid_models(api_key)
             st.session_state.valid_models = valid_models
         except Exception as e:
-            valid_models = DEFAULT_MODELS.copy()
+            valid_models = FALLBACK_MODELS.copy()
             st.session_state.valid_models = valid_models
     else:
-        valid_models = DEFAULT_MODELS.copy()
+        valid_models = FALLBACK_MODELS.copy()
         st.session_state.valid_models = valid_models
     
     st.divider()
@@ -242,25 +308,24 @@ with st.sidebar:
     # Configuración del modelo
     st.subheader("🎯 Modelo")
     
-    # Mostrar modelos con descripción
-    model_options = {}
-    for model in valid_models:
-        if model in GEMINI_MODELS:
-            model_options[model] = f"{GEMINI_MODELS[model]['name']} - {GEMINI_MODELS[model]['description']}"
-        else:
-            model_options[model] = model
+    # Asegurar que gemini-3.6-flash esté seleccionado por defecto
+    if DEFAULT_MODEL in valid_models:
+        default_index = valid_models.index(DEFAULT_MODEL)
+    else:
+        default_index = 0
     
     selected_model = st.selectbox(
         "Seleccionar modelo",
-        options=list(model_options.keys()),
-        format_func=lambda x: model_options.get(x, x),
-        help="Modelos Gemini disponibles. Se recomienda Gemini 2.5 Flash para QA"
+        options=valid_models,
+        index=default_index if DEFAULT_MODEL in valid_models else 0,
+        help="Modelos Gemini disponibles. Se recomienda Gemini 3.6 Flash"
     )
     
-    # Mostrar información del modelo seleccionado
-    if selected_model in GEMINI_MODELS:
-        st.caption(f"📊 {GEMINI_MODELS[selected_model]['description']}")
-        st.caption(f"📝 Max tokens: {GEMINI_MODELS[selected_model]['max_tokens']}")
+    # Mostrar modelo recomendado
+    if selected_model == DEFAULT_MODEL:
+        st.success("✅ Modelo recomendado: Gemini 3.6 Flash")
+    else:
+        st.info(f"ℹ️ Modelo seleccionado: {selected_model}")
     
     # Opciones avanzadas
     with st.expander("⚙️ Opciones avanzadas"):
@@ -294,7 +359,7 @@ with st.sidebar:
     # Información del sistema
     st.subheader("📊 Estado")
     st.info(f"""
-    **Prompt**: {'✅ Cargado' if system_prompt else '❌ No cargado'}
+    **Prompt V8**: {'✅ Cargado' if system_prompt else '❌ No cargado'}
     **Modelo**: {selected_model}
     **Temperatura**: {temperature}
     **Reintentos**: {max_retries}
@@ -307,17 +372,14 @@ with st.sidebar:
     if st.session_state.retry_count > 0:
         st.info(f"🔄 Reintentos: {st.session_state.retry_count}")
     
-    # Mostrar nota sobre modelos descontinuados
-    with st.expander("ℹ️ Nota sobre modelos"):
-        st.warning("""
-        **Modelos descontinuados:**
-        - ❌ gemini-2.0-flash (descontinuado)
-        - ❌ gemini-2.0-pro (descontinuado)
-        
-        **Modelos recomendados:**
-        - ✅ gemini-2.5-flash (rápido y eficiente)
-        - ✅ gemini-2.5-pro (más preciso)
-        """)
+    # Nota sobre modelos
+    with st.expander("ℹ️ Modelos disponibles"):
+        st.write("**Recomendado:**")
+        st.success(f"✅ {DEFAULT_MODEL}")
+        st.write("**Alternativos:**")
+        for m in valid_models:
+            if m != DEFAULT_MODEL:
+                st.write(f"• {m}")
 
 # ============================================
 # SECCIÓN PRINCIPAL - CARGA DE ARCHIVOS
@@ -420,27 +482,14 @@ elif not uploaded_file and st.session_state.source_content:
     source_text = st.session_state.source_content
 
 # ============================================
-# FUNCIONES DE PROCESAMIENTO CON REINTENTOS
+# FUNCIÓN PRINCIPAL CON GEMINI 3.6 FLASH
 # ============================================
 
-def validate_qa_structure(data):
-    """Valida la estructura del JSON generado"""
-    required_keys = ["TEST_CASES", "ALERTS", "COVERAGE"]
-    missing_keys = [k for k in required_keys if k not in data]
-    
-    if missing_keys:
-        raise ValueError(f"Faltan claves requeridas: {', '.join(missing_keys)}")
-    
-    if not isinstance(data["TEST_CASES"], list):
-        raise ValueError("TEST_CASES debe ser una lista")
-    
-    if len(data["TEST_CASES"]) == 0:
-        raise ValueError("No se generaron casos de prueba.")
-    
-    return data
-
-def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, temperature=0.1, max_retries=3, initial_wait=10):
-    """Genera datos QA con Gemini y manejo de rate limiting"""
+def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, temperature=0.1, max_retries=3, initial_wait=10):
+    """
+    Genera datos QA usando Gemini 3.6 Flash
+    NO CAMBIAR - Mantiene prompt V8, SCHEMA y estructura
+    """
     
     if not key:
         raise ValueError("❌ API Key no configurada")
@@ -458,15 +507,12 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
         # Intentar con el modelo seleccionado
         for m in models:
             if m.name.endswith(model_name) and 'generateContent' in m.supported_generation_methods:
-                # Verificar que no sea un modelo obsoleto (2.0)
-                if '2.0' not in model_name:
-                    model_found = True
-                    break
+                model_found = True
+                break
         
-        # Si no se encuentra, buscar en los modelos por defecto
         if not model_found:
             st.warning(f"⚠️ Modelo {model_name} no disponible. Buscando alternativa...")
-            for fallback in DEFAULT_MODELS:
+            for fallback in FALLBACK_MODELS:
                 for m in models:
                     if m.name.endswith(fallback) and 'generateContent' in m.supported_generation_methods:
                         st.info(f"🔄 Usando {fallback} como alternativa")
@@ -488,6 +534,7 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
         st.warning(f"⚠️ Contenido de {len(source_content)} caracteres. Truncado a {max_source_chars}.")
         source_content = source_content[:max_source_chars] + "\n... [Contenido truncado]"
     
+    # Preparar el prompt completo (Prompt V8 - NO CAMBIAR)
     full_prompt = f"{prompt_text}\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n{source_content}"
     
     # Progreso
@@ -503,17 +550,19 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
             status_text.text(f"⏳ Intento {attempt + 1} de {max_retries + 1} con {model_name}...")
             progress_bar.progress(10 + (attempt * 20))
             
+            # Configurar el modelo con el esquema
             model = genai.GenerativeModel(
                 model_name=model_name,
                 generation_config={
                     "response_mime_type": "application/json",
+                    "response_schema": SCHEMA,  # SCHEMA - NO CAMBIAR
                     "max_output_tokens": 8192,
                     "temperature": temperature,
                     "top_p": 0.95
                 }
             )
             
-            # Llamada a Gemini con timeout
+            # Generar contenido
             response = model.generate_content(full_prompt)
             
             progress_bar.progress(70)
@@ -539,6 +588,7 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
                     preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
                     raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
             
+            # Validar estructura
             validated_data = validate_qa_structure(data)
             
             # Éxito - resetear contadores
@@ -564,8 +614,8 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
                 st.session_state.retry_count = attempt + 1
                 
                 if attempt < max_retries:
-                    # Extraer tiempo de espera sugerido si está disponible
-                    retry_time = initial_wait * (attempt + 1)  # Backoff exponencial
+                    # Extraer tiempo de espera sugerido
+                    retry_time = wait_time * (attempt + 1)
                     try:
                         time_match = re.search(r'retry in (\d+\.?\d*)s', error_str)
                         if time_match:
@@ -576,9 +626,8 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
                     status_text.text(f"⏳ Cuota excedida. Esperando {retry_time:.0f} segundos...")
                     progress_bar.progress(20 + (attempt * 15))
                     
-                    st.warning(f"⚠️ Cuota de Gemini excedida. Reintentando en {retry_time:.0f} segundos... (Intento {attempt + 1} de {max_retries + 1})")
+                    st.warning(f"⚠️ Cuota excedida. Reintentando en {retry_time:.0f} segundos... (Intento {attempt + 1} de {max_retries + 1})")
                     
-                    # Esperar con barra de progreso
                     for i in range(int(retry_time)):
                         time.sleep(1)
                         progress_bar.progress(25 + (attempt * 15) + (i / retry_time * 20))
@@ -586,16 +635,8 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
                     continue
                 else:
                     st.error("❌ Se agotaron los reintentos. La cuota de Gemini sigue excedida.")
-                    st.info("""
-                    💡 **Recomendaciones:**
-                    1. Espera 1-2 minutos y vuelve a intentar
-                    2. Usa un modelo diferente (ej: gemini-2.5-flash)
-                    3. Reduce el tamaño del documento
-                    4. Considera usar una API Key con cuota de pago
-                    """)
                     raise ValueError("Cuota de Gemini excedida. Por favor espera unos minutos y reintenta.")
             else:
-                # Otro tipo de error
                 raise
         
         finally:
@@ -604,6 +645,26 @@ def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, te
                 status_text.empty()
     
     raise last_error if last_error else ValueError("Error desconocido al procesar")
+
+# ============================================
+# FUNCIÓN DE VALIDACIÓN
+# ============================================
+
+def validate_qa_structure(data):
+    """Valida la estructura del JSON generado - NO CAMBIAR"""
+    required_keys = ["TEST_CASES", "ALERTS", "COVERAGE"]
+    missing_keys = [k for k in required_keys if k not in data]
+    
+    if missing_keys:
+        raise ValueError(f"Faltan claves requeridas: {', '.join(missing_keys)}")
+    
+    if not isinstance(data["TEST_CASES"], list):
+        raise ValueError("TEST_CASES debe ser una lista")
+    
+    if len(data["TEST_CASES"]) == 0:
+        raise ValueError("No se generaron casos de prueba.")
+    
+    return data
 
 # ============================================
 # FUNCIONES DE GENERACIÓN DE ARCHIVOS
@@ -625,7 +686,7 @@ def get_safe_steps(tc):
     return steps
 
 def create_excel_v8(data):
-    """Crea Excel con Azure Import y Matriz QA"""
+    """Crea Excel con Azure Import y Matriz QA - NO CAMBIAR"""
     try:
         output = io.BytesIO()
         
@@ -727,7 +788,7 @@ def sanitize_text_for_pdf(text):
     return text
 
 def create_pdf_v8(data):
-    """Crea PDF con el reporte"""
+    """Crea PDF con el reporte - NO CAMBIAR"""
     try:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -937,7 +998,7 @@ if process_button:
         st.session_state.processing = True
         
         try:
-            result_json = generate_qa_data_with_retry(
+            result_json = generate_qa_data_with_gemini(
                 system_prompt,
                 text_to_process,
                 api_key,
@@ -948,7 +1009,7 @@ if process_button:
             )
             
             # Éxito - mostrar resultados
-            st.success("✅ Análisis QA generado exitosamente.")
+            st.success("✅ Análisis QA generado exitosamente con Gemini 3.6 Flash")
             
             # Generar archivos
             with st.spinner("⏳ Generando archivos Excel y PDF..."):
@@ -1017,7 +1078,7 @@ if process_button:
             2. Cambia a un modelo diferente en la barra lateral
             3. Reduce el tamaño del documento
             4. Verifica que tu API Key sea válida
-            5. Usa gemini-2.5-flash (recomendado)
+            5. Modelo recomendado: gemini-3.6-flash
             """)
             
         finally:
@@ -1030,6 +1091,6 @@ if process_button:
 st.divider()
 st.caption("""
 **Agente QA V8** — VERSION PREVIA — DRAFT | 
-Desarrollado con Streamlit y Google Gemini | 
+Desarrollado con Streamlit y Google Gemini 3.6 Flash | 
 Principios: Trazabilidad + Fidelidad + No Invención
 """)
