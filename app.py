@@ -56,6 +56,13 @@ st.markdown("""
         border: 2px dashed #2B6CB0;
         text-align: center;
     }
+    .quota-warning {
+        background-color: #fff3cd;
+        border: 1px solid #ffc107;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -87,6 +94,42 @@ if 'source_content' not in st.session_state:
     st.session_state.source_content = ""
 if 'valid_models' not in st.session_state:
     st.session_state.valid_models = []
+if 'quota_exceeded' not in st.session_state:
+    st.session_state.quota_exceeded = False
+if 'retry_count' not in st.session_state:
+    st.session_state.retry_count = 0
+
+# ============================================
+# MODELOS GEMINI ACTUALIZADOS (2026)
+# ============================================
+
+# Modelos Gemini actualizados según documentación oficial
+# Ref: https://ai.google.dev/gemini-api/docs/models
+GEMINI_MODELS = {
+    'gemini-2.5-flash': {
+        'name': 'Gemini 2.5 Flash',
+        'description': 'Modelo rápido y eficiente, ideal para QA',
+        'max_tokens': 8192
+    },
+    'gemini-2.5-pro': {
+        'name': 'Gemini 2.5 Pro',
+        'description': 'Modelo más preciso y detallado',
+        'max_tokens': 8192
+    },
+    'gemini-1.5-flash': {
+        'name': 'Gemini 1.5 Flash',
+        'description': 'Modelo rápido con buena calidad',
+        'max_tokens': 8192
+    },
+    'gemini-1.5-pro': {
+        'name': 'Gemini 1.5 Pro',
+        'description': 'Modelo preciso y estable',
+        'max_tokens': 8192
+    }
+}
+
+# Modelos por defecto en orden de preferencia
+DEFAULT_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro']
 
 # ============================================
 # CARGA DEL PROMPT
@@ -126,7 +169,7 @@ system_prompt = load_system_prompt()
 
 @st.cache_data(ttl=3600)
 def get_valid_models(api_key):
-    """Obtiene solo los modelos que soportan generateContent"""
+    """Obtiene los modelos Gemini disponibles que soportan generateContent"""
     try:
         genai.configure(api_key=api_key)
         models = genai.list_models()
@@ -135,26 +178,32 @@ def get_valid_models(api_key):
         for model in models:
             if 'generateContent' in model.supported_generation_methods:
                 model_name = model.name.split('/')[-1]
-                # Solo modelos Gemini que soportan generación de texto
+                # Verificar que sea un modelo Gemini válido
                 if 'gemini' in model_name.lower():
-                    valid_models.append(model_name)
+                    # Excluir modelos obsoletos
+                    if '2.0' not in model_name.lower():
+                        valid_models.append(model_name)
         
-        # Si no se encontraron modelos, usar los comunes
+        # Si no se encontraron modelos, usar los defaults
         if not valid_models:
-            valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+            valid_models = DEFAULT_MODELS.copy()
         
-        # Ordenar y eliminar duplicados
-        valid_models = sorted(set(valid_models))
+        # Ordenar por preferencia
+        ordered_models = []
+        for default in DEFAULT_MODELS:
+            if default in valid_models:
+                ordered_models.append(default)
         
-        # Filtrar modelos de investigación
-        invalid_patterns = ['research', 'preview', 'interactions']
-        valid_models = [m for m in valid_models if not any(p in m.lower() for p in invalid_patterns)]
+        # Agregar cualquier otro modelo no incluido en defaults
+        for model in valid_models:
+            if model not in ordered_models:
+                ordered_models.append(model)
         
-        return valid_models
+        return ordered_models
         
     except Exception as e:
         st.warning(f"⚠️ No se pudieron listar los modelos: {str(e)}")
-        return ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        return DEFAULT_MODELS.copy()
 
 # ============================================
 # SIDEBAR - CONFIGURACIÓN
@@ -177,17 +226,15 @@ with st.sidebar:
             help="Obtén tu API Key en https://makersuite.google.com/app/apikey"
         )
     
-    # Obtener modelos válidos si hay API Key
     if api_key:
         try:
             valid_models = get_valid_models(api_key)
             st.session_state.valid_models = valid_models
         except Exception as e:
-            st.error(f"❌ Error al obtener modelos: {str(e)}")
-            valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+            valid_models = DEFAULT_MODELS.copy()
             st.session_state.valid_models = valid_models
     else:
-        valid_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+        valid_models = DEFAULT_MODELS.copy()
         st.session_state.valid_models = valid_models
     
     st.divider()
@@ -195,24 +242,52 @@ with st.sidebar:
     # Configuración del modelo
     st.subheader("🎯 Modelo")
     
-    if valid_models:
-        selected_model = st.selectbox(
-            "Seleccionar modelo",
-            valid_models,
-            help="Modelos Gemini disponibles que soportan generación de texto"
-        )
-    else:
-        selected_model = "gemini-1.5-pro"
-        st.warning("⚠️ No se encontraron modelos disponibles")
+    # Mostrar modelos con descripción
+    model_options = {}
+    for model in valid_models:
+        if model in GEMINI_MODELS:
+            model_options[model] = f"{GEMINI_MODELS[model]['name']} - {GEMINI_MODELS[model]['description']}"
+        else:
+            model_options[model] = model
     
-    temperature = st.slider(
-        "🌡️ Temperatura",
-        min_value=0.0,
-        max_value=0.5,
-        value=0.1,
-        step=0.05,
-        help="0.0 = Máxima fidelidad a la fuente | 0.5 = Más creativo"
+    selected_model = st.selectbox(
+        "Seleccionar modelo",
+        options=list(model_options.keys()),
+        format_func=lambda x: model_options.get(x, x),
+        help="Modelos Gemini disponibles. Se recomienda Gemini 2.5 Flash para QA"
     )
+    
+    # Mostrar información del modelo seleccionado
+    if selected_model in GEMINI_MODELS:
+        st.caption(f"📊 {GEMINI_MODELS[selected_model]['description']}")
+        st.caption(f"📝 Max tokens: {GEMINI_MODELS[selected_model]['max_tokens']}")
+    
+    # Opciones avanzadas
+    with st.expander("⚙️ Opciones avanzadas"):
+        temperature = st.slider(
+            "🌡️ Temperatura",
+            min_value=0.0,
+            max_value=0.5,
+            value=0.1,
+            step=0.05,
+            help="0.0 = Máxima fidelidad | 0.5 = Más creativo"
+        )
+        
+        max_retries = st.number_input(
+            "🔄 Máximo de reintentos",
+            min_value=1,
+            max_value=5,
+            value=3,
+            help="Número de reintentos si hay límite de cuota"
+        )
+        
+        wait_time = st.number_input(
+            "⏱️ Espera inicial (segundos)",
+            min_value=5,
+            max_value=60,
+            value=10,
+            help="Tiempo de espera inicial entre reintentos"
+        )
     
     st.divider()
     
@@ -222,16 +297,30 @@ with st.sidebar:
     **Prompt**: {'✅ Cargado' if system_prompt else '❌ No cargado'}
     **Modelo**: {selected_model}
     **Temperatura**: {temperature}
+    **Reintentos**: {max_retries}
     **Modelos disponibles**: {len(valid_models)}
     """)
     
-    if valid_models:
-        with st.expander("📋 Modelos disponibles"):
-            for m in valid_models:
-                st.write(f"• {m}")
+    if st.session_state.quota_exceeded:
+        st.warning("⚠️ Cuota excedida. Espera unos minutos y reintenta.")
+    
+    if st.session_state.retry_count > 0:
+        st.info(f"🔄 Reintentos: {st.session_state.retry_count}")
+    
+    # Mostrar nota sobre modelos descontinuados
+    with st.expander("ℹ️ Nota sobre modelos"):
+        st.warning("""
+        **Modelos descontinuados:**
+        - ❌ gemini-2.0-flash (descontinuado)
+        - ❌ gemini-2.0-pro (descontinuado)
+        
+        **Modelos recomendados:**
+        - ✅ gemini-2.5-flash (rápido y eficiente)
+        - ✅ gemini-2.5-pro (más preciso)
+        """)
 
 # ============================================
-# SECCIÓN PRINCIPAL - SOLO CARGA DE ARCHIVOS
+# SECCIÓN PRINCIPAL - CARGA DE ARCHIVOS
 # ============================================
 
 st.subheader("📁 Carga de Documento")
@@ -307,7 +396,6 @@ if uploaded_file:
             if len(file_content) > 3000:
                 st.caption(f"... y {len(file_content) - 3000} caracteres más")
             
-            # Métricas
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("📝 Caracteres", len(file_content))
@@ -319,7 +407,6 @@ if uploaded_file:
     except Exception as e:
         st.error(f"❌ Error al procesar el archivo: {str(e)}")
 
-# Si no hay archivo, mostrar alternativa de texto manual
 if not uploaded_file and not st.session_state.source_content:
     st.info("💡 También puedes ingresar texto manualmente en el área inferior")
     source_text = st.text_area(
@@ -333,7 +420,7 @@ elif not uploaded_file and st.session_state.source_content:
     source_text = st.session_state.source_content
 
 # ============================================
-# FUNCIONES DE PROCESAMIENTO
+# FUNCIONES DE PROCESAMIENTO CON REINTENTOS
 # ============================================
 
 def validate_qa_structure(data):
@@ -352,32 +439,37 @@ def validate_qa_structure(data):
     
     return data
 
-def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0.1):
-    """Genera datos QA con Gemini"""
+def generate_qa_data_with_retry(prompt_text, source_content, key, model_name, temperature=0.1, max_retries=3, initial_wait=10):
+    """Genera datos QA con Gemini y manejo de rate limiting"""
+    
     if not key:
         raise ValueError("❌ API Key no configurada")
     
     if not source_content.strip():
         raise ValueError("❌ Fuente de información vacía")
     
+    genai.configure(api_key=key)
+    
+    # Verificar modelos disponibles
     try:
-        genai.configure(api_key=key)
-        
-        # Verificar que el modelo soporte generateContent
         models = genai.list_models()
         model_found = False
+        
+        # Intentar con el modelo seleccionado
         for m in models:
             if m.name.endswith(model_name) and 'generateContent' in m.supported_generation_methods:
-                model_found = True
-                break
+                # Verificar que no sea un modelo obsoleto (2.0)
+                if '2.0' not in model_name:
+                    model_found = True
+                    break
         
+        # Si no se encuentra, buscar en los modelos por defecto
         if not model_found:
-            # Buscar un modelo alternativo
-            fallback_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
-            for fallback in fallback_models:
+            st.warning(f"⚠️ Modelo {model_name} no disponible. Buscando alternativa...")
+            for fallback in DEFAULT_MODELS:
                 for m in models:
                     if m.name.endswith(fallback) and 'generateContent' in m.supported_generation_methods:
-                        st.warning(f"⚠️ Modelo {model_name} no disponible. Usando {fallback}")
+                        st.info(f"🔄 Usando {fallback} como alternativa")
                         model_name = fallback
                         model_found = True
                         break
@@ -386,72 +478,136 @@ def generate_qa_data(prompt_text, source_content, key, model_name, temperature=0
         
         if not model_found:
             raise ValueError("❌ No se encontró ningún modelo Gemini disponible")
-        
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "response_mime_type": "application/json",
-                "max_output_tokens": 8192,
-                "temperature": temperature,
-                "top_p": 0.95
-            }
-        )
-        
-        # Limitar tamaño de entrada
-        max_source_chars = 30000
-        if len(source_content) > max_source_chars:
-            st.warning(f"⚠️ Contenido de {len(source_content)} caracteres. Truncado a {max_source_chars}.")
-            source_content = source_content[:max_source_chars] + "\n... [Contenido truncado]"
-        
-        full_prompt = f"{prompt_text}\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n{source_content}"
-        
-        # Progreso
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        status_text.text(f"⏳ Iniciando análisis con {model_name}...")
-        progress_bar.progress(10)
-        
-        # Llamada a Gemini
-        response = model.generate_content(full_prompt)
-        
-        progress_bar.progress(70)
-        status_text.text("⏳ Procesando respuesta...")
-        
-        if not response.text:
-            raise ValueError("❌ Gemini no devolvió contenido")
-        
-        # Parsear JSON
-        try:
-            data = json.loads(response.text)
-        except json.JSONDecodeError as e:
-            clean_text = response.text.strip()
-            json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
-            if json_match:
-                clean_text = json_match.group(1)
-            elif re.search(r'```\s*([\s\S]*?)\s*```', clean_text):
-                clean_text = re.search(r'```\s*([\s\S]*?)\s*```', clean_text).group(1)
             
-            try:
-                data = json.loads(clean_text)
-            except json.JSONDecodeError:
-                preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
-                raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
-        
-        validated_data = validate_qa_structure(data)
-        
-        progress_bar.progress(100)
-        status_text.text(f"✅ Procesamiento completado con {model_name}")
-        
-        time.sleep(0.5)
-        progress_bar.empty()
-        status_text.empty()
-        
-        return validated_data
-        
     except Exception as e:
-        logger.error(f"Error en generate_qa_data: {str(e)}")
-        raise
+        st.warning(f"⚠️ Error al listar modelos: {str(e)}")
+    
+    # Limitar tamaño de entrada
+    max_source_chars = 30000
+    if len(source_content) > max_source_chars:
+        st.warning(f"⚠️ Contenido de {len(source_content)} caracteres. Truncado a {max_source_chars}.")
+        source_content = source_content[:max_source_chars] + "\n... [Contenido truncado]"
+    
+    full_prompt = f"{prompt_text}\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n{source_content}"
+    
+    # Progreso
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Intentar con reintentos
+    last_error = None
+    wait_time = initial_wait
+    
+    for attempt in range(max_retries + 1):
+        try:
+            status_text.text(f"⏳ Intento {attempt + 1} de {max_retries + 1} con {model_name}...")
+            progress_bar.progress(10 + (attempt * 20))
+            
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 8192,
+                    "temperature": temperature,
+                    "top_p": 0.95
+                }
+            )
+            
+            # Llamada a Gemini con timeout
+            response = model.generate_content(full_prompt)
+            
+            progress_bar.progress(70)
+            status_text.text("⏳ Procesando respuesta...")
+            
+            if not response.text:
+                raise ValueError("❌ Gemini no devolvió contenido")
+            
+            # Parsear JSON
+            try:
+                data = json.loads(response.text)
+            except json.JSONDecodeError as e:
+                clean_text = response.text.strip()
+                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
+                if json_match:
+                    clean_text = json_match.group(1)
+                elif re.search(r'```\s*([\s\S]*?)\s*```', clean_text):
+                    clean_text = re.search(r'```\s*([\s\S]*?)\s*```', clean_text).group(1)
+                
+                try:
+                    data = json.loads(clean_text)
+                except json.JSONDecodeError:
+                    preview = response.text[:500] + "..." if len(response.text) > 500 else response.text
+                    raise ValueError(f"❌ Error al parsear JSON. Respuesta: {preview}")
+            
+            validated_data = validate_qa_structure(data)
+            
+            # Éxito - resetear contadores
+            st.session_state.quota_exceeded = False
+            st.session_state.retry_count = 0
+            
+            progress_bar.progress(100)
+            status_text.text(f"✅ Procesamiento completado con {model_name}")
+            
+            time.sleep(0.5)
+            progress_bar.empty()
+            status_text.empty()
+            
+            return validated_data
+            
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            
+            # Verificar si es error de cuota (429)
+            if '429' in error_str or 'quota' in error_str.lower() or 'rate limit' in error_str.lower():
+                st.session_state.quota_exceeded = True
+                st.session_state.retry_count = attempt + 1
+                
+                if attempt < max_retries:
+                    # Extraer tiempo de espera sugerido si está disponible
+                    retry_time = initial_wait * (attempt + 1)  # Backoff exponencial
+                    try:
+                        time_match = re.search(r'retry in (\d+\.?\d*)s', error_str)
+                        if time_match:
+                            retry_time = float(time_match.group(1)) + 5
+                    except:
+                        pass
+                    
+                    status_text.text(f"⏳ Cuota excedida. Esperando {retry_time:.0f} segundos...")
+                    progress_bar.progress(20 + (attempt * 15))
+                    
+                    st.warning(f"⚠️ Cuota de Gemini excedida. Reintentando en {retry_time:.0f} segundos... (Intento {attempt + 1} de {max_retries + 1})")
+                    
+                    # Esperar con barra de progreso
+                    for i in range(int(retry_time)):
+                        time.sleep(1)
+                        progress_bar.progress(25 + (attempt * 15) + (i / retry_time * 20))
+                    
+                    continue
+                else:
+                    st.error("❌ Se agotaron los reintentos. La cuota de Gemini sigue excedida.")
+                    st.info("""
+                    💡 **Recomendaciones:**
+                    1. Espera 1-2 minutos y vuelve a intentar
+                    2. Usa un modelo diferente (ej: gemini-2.5-flash)
+                    3. Reduce el tamaño del documento
+                    4. Considera usar una API Key con cuota de pago
+                    """)
+                    raise ValueError("Cuota de Gemini excedida. Por favor espera unos minutos y reintenta.")
+            else:
+                # Otro tipo de error
+                raise
+        
+        finally:
+            if attempt == max_retries and last_error:
+                progress_bar.empty()
+                status_text.empty()
+    
+    raise last_error if last_error else ValueError("Error desconocido al procesar")
+
+# ============================================
+# FUNCIONES DE GENERACIÓN DE ARCHIVOS
+# ============================================
 
 def get_safe_text(text, default=""):
     """Obtiene texto de manera segura"""
@@ -530,12 +686,10 @@ def create_excel_v8(data):
         
         df_matriz = pd.DataFrame(matriz_rows)
         
-        # Guardar Excel
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_azure.to_excel(writer, sheet_name="Azure Import", index=False)
             df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
             
-            # Ajustar anchos
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 for column in worksheet.columns:
@@ -634,7 +788,6 @@ def create_pdf_v8(data):
         story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
         story.append(Spacer(1, 20))
         
-        # Resumen
         test_cases = data.get("TEST_CASES", [])
         total_cp = len(test_cases)
         total_alerts = len(data.get("ALERTS", []))
@@ -656,7 +809,6 @@ def create_pdf_v8(data):
         
         story.append(Spacer(1, 10))
         
-        # Alertas Generales
         alerts = data.get("ALERTS", [])
         if alerts:
             story.append(Paragraph("ALERTAS GENERALES", h2_style))
@@ -671,7 +823,6 @@ def create_pdf_v8(data):
             story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
             story.append(Spacer(1, 10))
         
-        # Casos de Prueba
         story.append(Paragraph("CASOS DE PRUEBA", h2_style))
         story.append(Spacer(1, 5))
         
@@ -785,41 +936,30 @@ if process_button:
     else:
         st.session_state.processing = True
         
-        progress_container = st.container()
-        
-        with progress_container:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-        
         try:
-            status_text.text("⏳ Iniciando análisis de requisitos...")
-            progress_bar.progress(10)
-            
-            result_json = generate_qa_data(
-                system_prompt, 
-                text_to_process, 
-                api_key, 
+            result_json = generate_qa_data_with_retry(
+                system_prompt,
+                text_to_process,
+                api_key,
                 selected_model,
-                temperature
+                temperature,
+                max_retries,
+                wait_time
             )
             
-            progress_bar.progress(50)
-            status_text.text("⏳ Generando archivos Excel y PDF...")
+            # Éxito - mostrar resultados
+            st.success("✅ Análisis QA generado exitosamente.")
             
-            excel_file = create_excel_v8(result_json)
-            progress_bar.progress(70)
+            # Generar archivos
+            with st.spinner("⏳ Generando archivos Excel y PDF..."):
+                excel_file = create_excel_v8(result_json)
+                pdf_file = create_pdf_v8(result_json)
             
-            pdf_file = create_pdf_v8(result_json)
-            progress_bar.progress(90)
-            
+            # Guardar en sesión
             st.session_state.result_json = result_json
             st.session_state.last_processed = datetime.now()
             
-            progress_bar.progress(100)
-            status_text.text("✅ Procesamiento completado exitosamente!")
-            
-            st.success("✅ Análisis QA generado exitosamente.")
-            
+            # Métricas
             test_cases = result_json.get("TEST_CASES", [])
             total_steps = sum(len(get_safe_steps(tc)) for tc in test_cases)
             total_alerts = len(result_json.get("ALERTS", []))
@@ -843,6 +983,7 @@ if process_button:
                 for stype, count in scenario_types.items():
                     st.write(f"**{stype}**: {count} casos")
             
+            # Botones de descarga
             col1, col2 = st.columns(2)
             
             with col1:
@@ -866,21 +1007,17 @@ if process_button:
             with st.expander("🔍 Ver JSON generado"):
                 st.json(result_json)
             
-            time.sleep(2)
-            progress_bar.empty()
-            status_text.empty()
-            
         except Exception as e:
             st.error(f"❌ Error al procesar: {str(e)}")
             logger.error(f"Error: {str(e)}")
             
             st.info("""
             💡 **Posibles soluciones:**
-            1. Verifica que tu API Key sea válida
-            2. Asegúrate de que el documento tenga información suficiente
-            3. Prueba con un modelo diferente en la barra lateral
-            4. Reduce el tamaño del documento
-            5. Revisa que prompt_qa.txt exista
+            1. Espera unos minutos y vuelve a intentar (cuota de Gemini)
+            2. Cambia a un modelo diferente en la barra lateral
+            3. Reduce el tamaño del documento
+            4. Verifica que tu API Key sea válida
+            5. Usa gemini-2.5-flash (recomendado)
             """)
             
         finally:
