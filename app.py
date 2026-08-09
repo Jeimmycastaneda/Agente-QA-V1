@@ -11,8 +11,12 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-import google.generativeai as genai
-from google.generativeai import types
+
+# ============================================
+# IMPORTACIÓN CORRECTA DE GEMINI
+# ============================================
+from google import genai
+from google.genai import types
 
 # ============================================
 # CONFIGURACIÓN INICIAL
@@ -238,16 +242,15 @@ system_prompt = load_system_prompt()
 def get_valid_models(api_key):
     """Obtiene los modelos Gemini disponibles"""
     try:
-        genai.configure(api_key=api_key)
-        models = genai.list_models()
+        client = genai.Client(api_key=api_key)
+        models = client.models.list()
         
         valid_models = []
         for model in models:
-            if 'generateContent' in model.supported_generation_methods:
-                model_name = model.name.split('/')[-1]
-                if 'gemini' in model_name.lower():
-                    if '2.0' not in model_name.lower():
-                        valid_models.append(model_name)
+            model_name = model.name.split('/')[-1]
+            if 'gemini' in model_name.lower():
+                if '2.0' not in model_name.lower():
+                    valid_models.append(model_name)
         
         if MODEL not in valid_models:
             valid_models.insert(0, MODEL)
@@ -476,35 +479,11 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
     if not source_content.strip():
         raise ValueError("❌ Fuente de información vacía")
     
-    genai.configure(api_key=key)
+    # ============================================
+    # CONFIGURACIÓN DEL CLIENTE GEMINI
+    # ============================================
     
-    # Verificar modelos disponibles
-    try:
-        models = genai.list_models()
-        model_found = False
-        
-        for m in models:
-            if m.name.endswith(model_name) and 'generateContent' in m.supported_generation_methods:
-                model_found = True
-                break
-        
-        if not model_found:
-            st.warning(f"⚠️ Modelo {model_name} no disponible. Buscando alternativa...")
-            for fallback in FALLBACK_MODELS:
-                for m in models:
-                    if m.name.endswith(fallback) and 'generateContent' in m.supported_generation_methods:
-                        st.info(f"🔄 Usando {fallback} como alternativa")
-                        model_name = fallback
-                        model_found = True
-                        break
-                if model_found:
-                    break
-        
-        if not model_found:
-            raise ValueError("❌ No se encontró ningún modelo Gemini disponible")
-            
-    except Exception as e:
-        st.warning(f"⚠️ Error al listar modelos: {str(e)}")
+    client = genai.Client(api_key=key)
     
     # Limitar tamaño de entrada
     max_source_chars = 30000
@@ -529,13 +508,9 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
             progress_bar.progress(10 + (attempt * 20))
             
             # ============================================
-            # LLAMADA A GEMINI CON CONFIGURACIÓN ESPECÍFICA
+            # LLAMADA A GEMINI CON LA CONFIGURACIÓN ESPECIFICADA
             # ============================================
             
-            # Configurar el cliente
-            client = genai
-            
-            # Realizar la llamada con la configuración especificada
             r = client.models.generate_content(
                 model=model_name,
                 contents=full_prompt,
@@ -556,13 +531,6 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
             try:
                 data = json.loads(text)
             except json.JSONDecodeError as e:
-                # Capturar el finish_reason para diagnóstico
-                finish_reason = ""
-                try:
-                    finish_reason = str(r.candidates[0].finish_reason)
-                except Exception:
-                    pass
-                
                 # Intentar limpiar la respuesta
                 clean_text = text
                 json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
@@ -576,9 +544,8 @@ def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, t
                 except json.JSONDecodeError:
                     # Lanzar error detallado
                     raise RuntimeError(
-                        f"✖ Gemini devolvió JSON incompleto o inválido. "
-                        f"Finish reason: {finish_reason}. "
-                        f"Detalle: {e}"
+                        f"✖ Error al parsear JSON. Detalle: {e}. "
+                        f"Respuesta: {text[:3000]}"
                     )
             
             # Validar estructura
