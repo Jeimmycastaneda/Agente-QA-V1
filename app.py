@@ -70,13 +70,6 @@ st.markdown("""
         font-size: 0.8rem;
         display: inline-block;
     }
-    .option-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2B6CB0;
-        margin-bottom: 0.5rem;
-    }
     .fixed-buttons {
         background: white;
         padding: 1rem 0;
@@ -697,12 +690,13 @@ def get_safe_steps(tc):
     return steps
 
 # ============================================
-# FUNCIÓN PARA GENERAR EXCEL CON FORMATO SELECCIONADO
+# FUNCIÓN PARA GENERAR EXCEL CON FORMATO SEGÚN TIPO DE PRUEBA
 # ============================================
 
 def create_excel_v8(data, config_key):
     """
     Crea Excel con la estructura según el formato seleccionado
+    Detecta automáticamente el tipo de prueba (UI o BD) para formatear los pasos
     """
     try:
         output = io.BytesIO()
@@ -721,11 +715,44 @@ def create_excel_v8(data, config_key):
             case_title = get_safe_text(tc.get("Title", f"{case_id} Sin título"))
             steps = get_safe_steps(tc)
             preconditions = get_safe_text(tc.get("Preconditions", ""))
+            description = get_safe_text(tc.get("Description", ""))
+            scenario = get_safe_text(tc.get("Scenario", ""))
+            
+            # ============================================
+            # DETECTAR TIPO DE PRUEBA (UI o BD)
+            # ============================================
+            test_type = "UI"  # Por defecto
+            bd_keywords = ["base de datos", "bd", "query", "sql", "script", "tabla", "select", "insert", "update", 
+                          "delete", "ejecutar", "consulta", "almacenamiento", "fasecolda", "sisa", "web services"]
+            
+            # Buscar en descripción, escenario, precondiciones y steps
+            text_to_check = f"{description} {scenario} {preconditions}"
+            for step in steps:
+                text_to_check += f" {step.get('Action', '')} {step.get('Expected value', '')}"
+            
+            text_to_check = text_to_check.lower()
+            
+            # Contar coincidencias con palabras clave de BD
+            bd_count = sum(1 for keyword in bd_keywords if keyword in text_to_check)
+            
+            # Si hay más de 2 coincidencias con palabras clave de BD, clasificar como BD
+            if bd_count >= 2:
+                test_type = "BD"
+            
+            # También detectar por palabras clave específicas en el título
+            if "bd" in case_title.lower() or "base de datos" in case_title.lower() or "query" in case_title.lower():
+                test_type = "BD"
+            
+            # Si el escenario contiene "base de datos" o "BD", clasificar como BD
+            if "base de datos" in scenario.lower() or "bd" in scenario.lower() or "query" in scenario.lower():
+                test_type = "BD"
             
             test_case_id = base_id + idx
             test_point_id = f"{base_testpoint + idx}:0"
             
+            # ============================================
             # FILA 1: TÍTULO DEL CASO
+            # ============================================
             azure_rows.append({
                 "TestCaseId": test_case_id,
                 "Title": case_title,
@@ -739,7 +766,9 @@ def create_excel_v8(data, config_key):
                 "Comment": ""
             })
             
-            # FILAS DE STEPS
+            # ============================================
+            # FILAS DE STEPS SEGÚN TIPO DE PRUEBA
+            # ============================================
             if not steps:
                 azure_rows.append({
                     "TestCaseId": "",
@@ -759,26 +788,50 @@ def create_excel_v8(data, config_key):
                     step_action = get_safe_text(step.get("Action", ""))
                     step_expected = get_safe_text(step.get("Expected value", ""))
                     
-                    # ENRIQUECER STEPS CON USUARIOS
-                    if steps_with_users and user_default:
-                        user_keywords = ["usuario", "suscriptor", "admin", "operador", "consultor", "validador"]
-                        has_user = any(keyword in step_action.lower() for keyword in user_keywords)
+                    # ============================================
+                    # FORMATO UI: Pasos con acciones detalladas y usuarios
+                    # ============================================
+                    if test_type == "UI":
+                        # Enriquecer con usuarios
+                        if steps_with_users and user_default:
+                            user_keywords = ["usuario", "suscriptor", "admin", "operador", "consultor", "validador"]
+                            has_user = any(keyword in step_action.lower() for keyword in user_keywords)
+                            
+                            if not has_user and len(step_action) > 0:
+                                if "usuario" in preconditions.lower():
+                                    user_match = re.search(r'(usuario|suscriptor|admin|operador)\s+([^,\n]+)', preconditions, re.IGNORECASE)
+                                    if user_match:
+                                        user_type = user_match.group(0).strip()
+                                        step_action = f"{step_action} con {user_type}"
+                                else:
+                                    if "ingresar" in step_action.lower() or "login" in step_action.lower() or "acceder" in step_action.lower():
+                                        step_action = f"Ingresar con el usuario y contraseña de {user_default}. {step_action}"
                         
-                        if not has_user and len(step_action) > 0:
-                            if "usuario" in preconditions.lower():
-                                user_match = re.search(r'(usuario|suscriptor|admin|operador)\s+([^,\n]+)', preconditions, re.IGNORECASE)
-                                if user_match:
-                                    user_type = user_match.group(0).strip()
-                                    step_action = f"{step_action} con {user_type}"
-                            else:
-                                if "ingresar" in step_action.lower() or "login" in step_action.lower() or "acceder" in step_action.lower():
-                                    step_action = f"Ingresar con el usuario y contraseña de {user_default}. {step_action}"
+                        # Enriquecer descripciones cortas
+                        if len(step_action) < 15 and step_action:
+                            step_action = f"{step_action}. Verificar comportamiento esperado."
+                        if len(step_expected) < 15 and step_expected:
+                            step_expected = f"{step_expected}. Validar que el sistema responda correctamente."
                     
-                    # Enriquecer descripciones cortas
-                    if len(step_action) < 15 and step_action:
-                        step_action = f"{step_action}. Verificar comportamiento esperado."
-                    if len(step_expected) < 15 and step_expected:
-                        step_expected = f"{step_expected}. Validar que el sistema responda correctamente."
+                    # ============================================
+                    # FORMATO BD: Pasos técnicos con scripts
+                    # ============================================
+                    elif test_type == "BD":
+                        # Formato específico para BD
+                        if "ejecutar" in step_action.lower() or "query" in step_action.lower() or "select" in step_action.lower():
+                            # Extraer el script SQL si existe
+                            sql_match = re.search(r'(SELECT|INSERT|UPDATE|DELETE|EXEC|exec|select|insert|update|delete)\s+.*', step_action, re.IGNORECASE)
+                            if sql_match:
+                                sql_script = sql_match.group(0)
+                                step_action = f"Ejecutar el siguiente script: {sql_script}"
+                            else:
+                                # Si no tiene SQL explícito, formatear como consulta
+                                if "query" in step_action.lower() or "script" in step_action.lower():
+                                    step_action = f"Ejecutar el script de consulta en la base de datos"
+                        
+                        # Formato de expected para BD
+                        if len(step_expected) < 15 and step_expected:
+                            step_expected = f"Mostrar los resultados de la consulta correctamente"
                     
                     azure_rows.append({
                         "TestCaseId": "",
@@ -795,7 +848,10 @@ def create_excel_v8(data, config_key):
         
         df_azure = pd.DataFrame(azure_rows)
         
-        # HOJA 2: MATRIZ QA
+        # ============================================
+        # HOJA 2: MATRIZ QA con tipo de prueba
+        # ============================================
+        
         matriz_rows = []
         for idx, tc in enumerate(data.get("TEST_CASES", [])):
             alerts_list = tc.get("Alerts", [])
@@ -804,6 +860,13 @@ def create_excel_v8(data, config_key):
             
             description = get_safe_text(tc.get("Description", ""))
             scenario = get_safe_text(tc.get("Scenario", ""))
+            
+            # Determinar tipo de prueba para la matriz
+            case_text = f"{description} {scenario}"
+            bd_keywords = ["base de datos", "bd", "query", "sql", "script", "tabla", "select", "fasecolda", "sisa"]
+            is_bd = any(keyword in case_text.lower() for keyword in bd_keywords)
+            
+            validation_method = "BD" if is_bd else "UI"
             
             if steps_with_users and user_default and scenario:
                 if "usuario" not in scenario.lower():
@@ -814,14 +877,17 @@ def create_excel_v8(data, config_key):
                 "Criterion": get_safe_text(tc.get("Criterion", "")),
                 "Scenario": scenario if scenario else description[:50] + "..." if len(description) > 50 else description,
                 "Test Case": get_safe_text(tc.get("ID", "")),
-                "Validation Method": get_safe_text(tc.get("Validation Method", "UI")),
+                "Validation Method": validation_method,
                 "Coverage": get_safe_text(tc.get("Coverage", "Pendiente")),
                 "Alerts": alerts_str
             })
         
         df_matriz = pd.DataFrame(matriz_rows)
         
+        # ============================================
         # GUARDAR EXCEL
+        # ============================================
+        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_azure.to_excel(writer, sheet_name=config["sheet_name"], index=False)
             df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
