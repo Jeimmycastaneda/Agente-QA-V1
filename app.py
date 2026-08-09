@@ -626,125 +626,6 @@ def validate_qa_structure(data):
     return data
 
 # ============================================
-# FUNCIÓN PARA GENERAR EXCEL CON ESTRUCTURA ESPECÍFICA
-# ============================================
-
-def create_excel_v8(data):
-    """
-    Crea Excel con la estructura exacta para Azure Import
-    Basado en el ejemplo: OTE_Siniestros Fasecolda_-- All --_-- All --.xlsx
-    """
-    try:
-        output = io.BytesIO()
-        
-        # ============================================
-        # HOJA 1: AZURE IMPORT - ESTRUCTURA EXACTA
-        # ============================================
-        # Columnas según el ejemplo:
-        # TestCaseId | Title | TestStep | StepAction | StepExpected | TestPointId | Configuration | Tester | Outcome | Comment
-        # ============================================
-        
-        azure_rows = []
-        
-        # Generar un ID numérico secuencial para TestCaseId
-        # Empezando desde 28454 como en el ejemplo
-        base_id = 28454
-        
-        for idx, tc in enumerate(data.get("TEST_CASES", [])):
-            # Extraer el ID del caso (ej: CP-ACSF-00001)
-            case_id = get_safe_text(tc.get("ID", f"CP-ACSF-{idx+1:05d}"))
-            case_title = get_safe_text(tc.get("Title", f"{case_id} Sin título"))
-            steps = get_safe_steps(tc)
-            
-            # Asignar TestCaseId numérico
-            test_case_id = base_id + idx
-            
-            if not steps:
-                # Si no hay steps, crear una fila con mensaje
-                azure_rows.append({
-                    "TestCaseId": test_case_id,
-                    "Title": case_title,
-                    "TestStep": "",
-                    "StepAction": "Sin steps definidos",
-                    "StepExpected": "Validar con equipo funcional",
-                    "TestPointId": "",
-                    "Configuration": "Default configuration created @ 26/05/2023 15:22:17",
-                    "Tester": "",
-                    "Outcome": "",
-                    "Comment": ""
-                })
-            else:
-                # Crear una fila por cada step
-                for step_idx, step in enumerate(steps):
-                    step_num = step.get("Step #", step_idx + 1)
-                    azure_rows.append({
-                        "TestCaseId": test_case_id,
-                        "Title": case_title,
-                        "TestStep": step_num,
-                        "StepAction": get_safe_text(step.get("Action", "")),
-                        "StepExpected": get_safe_text(step.get("Expected value", "")),
-                        "TestPointId": "",
-                        "Configuration": "Default configuration created @ 26/05/2023 15:22:17",
-                        "Tester": "",
-                        "Outcome": "",
-                        "Comment": ""
-                    })
-        
-        df_azure = pd.DataFrame(azure_rows)
-        
-        # ============================================
-        # HOJA 2: MATRIZ QA
-        # ============================================
-        
-        matriz_rows = []
-        for tc in data.get("TEST_CASES", []):
-            alerts_list = tc.get("Alerts", [])
-            alerts_str = " | ".join([f"{a.get('Alert', '')}: {a.get('Reason', '')}" 
-                                   for a in alerts_list if a.get('Alert') and a.get('Reason')]) if alerts_list else "Sin Alertas"
-            
-            matriz_rows.append({
-                "Requirement / Use Case": get_safe_text(tc.get("Related Use Case", "")),
-                "Criterion": get_safe_text(tc.get("Criterion", "")),
-                "Scenario": get_safe_text(tc.get("Scenario", "")),
-                "Test Case": get_safe_text(tc.get("ID", "")),
-                "Validation Method": get_safe_text(tc.get("Validation Method", "UI")),
-                "Coverage": get_safe_text(tc.get("Coverage", "Pendiente")),
-                "Alerts": alerts_str
-            })
-        
-        df_matriz = pd.DataFrame(matriz_rows)
-        
-        # ============================================
-        # GUARDAR EXCEL CON AMBAS HOJAS
-        # ============================================
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_azure.to_excel(writer, sheet_name="28443;Fase 3 - RENK170 Siniestr", index=False)
-            df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
-            
-            # Ajustar anchos de columnas
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 60)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        output.seek(0)
-        return output
-        
-    except Exception as e:
-        logger.error(f"Error en create_excel_v8: {str(e)}")
-        raise
-
-# ============================================
 # FUNCIONES AUXILIARES
 # ============================================
 
@@ -762,6 +643,168 @@ def get_safe_steps(tc):
     if not isinstance(steps, list):
         return []
     return steps
+
+# ============================================
+# FUNCIÓN PARA GENERAR EXCEL CON ESTRUCTURA ESPECÍFICA
+# ============================================
+
+def create_excel_v8(data):
+    """
+    Crea Excel con la estructura exacta para Azure Import
+    Basado en el ejemplo: OTE_Siniestros Fasecolda_-- All --_-- All --.xlsx
+    Los pasos deben tener descripciones detalladas similares al ejemplo
+    """
+    try:
+        output = io.BytesIO()
+        
+        # ============================================
+        # HOJA 1: AZURE IMPORT - ESTRUCTURA EXACTA
+        # ============================================
+        # Columnas según el ejemplo:
+        # TestCaseId | Title | TestStep | StepAction | StepExpected | TestPointId | Configuration | Tester | Outcome | Comment
+        # ============================================
+        
+        azure_rows = []
+        
+        # Generar un ID numérico secuencial para TestCaseId
+        # Empezando desde 28454 como en el ejemplo
+        base_id = 28454
+        
+        # Empezar TestPointId desde 6552
+        base_testpoint = 6552
+        
+        for idx, tc in enumerate(data.get("TEST_CASES", [])):
+            # Extraer el ID del caso (ej: CP-ACSF-00001)
+            case_id = get_safe_text(tc.get("ID", f"CP-ACSF-{idx+1:05d}"))
+            case_title = get_safe_text(tc.get("Title", f"{case_id} Sin título"))
+            steps = get_safe_steps(tc)
+            
+            # Asignar TestCaseId numérico
+            test_case_id = base_id + idx
+            test_point_id = f"{base_testpoint + idx}:0"
+            
+            # ============================================
+            # FILA 1: TÍTULO DEL CASO (TestStep vacío)
+            # ============================================
+            azure_rows.append({
+                "TestCaseId": test_case_id,
+                "Title": case_title,
+                "TestStep": "",
+                "StepAction": "",
+                "StepExpected": "",
+                "TestPointId": test_point_id,
+                "Configuration": "Default configuration created @ 26/05/2023 15:22:17",
+                "Tester": "Isabel Cristina Mejía López",
+                "Outcome": "",
+                "Comment": ""
+            })
+            
+            # ============================================
+            # FILAS DE STEPS CON DESCRIPCIONES DETALLADAS
+            # ============================================
+            if not steps:
+                # Si no hay steps, crear una fila con mensaje
+                azure_rows.append({
+                    "TestCaseId": "",
+                    "Title": "",
+                    "TestStep": 1,
+                    "StepAction": "Sin steps definidos. Validar con equipo funcional.",
+                    "StepExpected": "Definir pasos según comportamiento esperado",
+                    "TestPointId": "",
+                    "Configuration": "",
+                    "Tester": "",
+                    "Outcome": "",
+                    "Comment": ""
+                })
+            else:
+                # Crear una fila por cada step con descripciones detalladas
+                for step_idx, step in enumerate(steps):
+                    step_num = step.get("Step #", step_idx + 1)
+                    step_action = get_safe_text(step.get("Action", ""))
+                    step_expected = get_safe_text(step.get("Expected value", ""))
+                    
+                    # Enriquecer descripciones si son muy cortas
+                    if len(step_action) < 10 and step_action:
+                        step_action = f"{step_action}. Verificar comportamiento esperado."
+                    if len(step_expected) < 10 and step_expected:
+                        step_expected = f"{step_expected}. Validar que el sistema responda correctamente."
+                    
+                    azure_rows.append({
+                        "TestCaseId": "",
+                        "Title": "",
+                        "TestStep": step_num,
+                        "StepAction": step_action,
+                        "StepExpected": step_expected,
+                        "TestPointId": "",
+                        "Configuration": "",
+                        "Tester": "",
+                        "Outcome": "",
+                        "Comment": ""
+                    })
+        
+        df_azure = pd.DataFrame(azure_rows)
+        
+        # ============================================
+        # HOJA 2: MATRIZ QA
+        # ============================================
+        
+        matriz_rows = []
+        for idx, tc in enumerate(data.get("TEST_CASES", [])):
+            alerts_list = tc.get("Alerts", [])
+            alerts_str = " | ".join([f"{a.get('Alert', '')}: {a.get('Reason', '')}" 
+                                   for a in alerts_list if a.get('Alert') and a.get('Reason')]) if alerts_list else "Sin Alertas"
+            
+            # Obtener descripción y escenario para enriquecer la matriz
+            description = get_safe_text(tc.get("Description", ""))
+            scenario = get_safe_text(tc.get("Scenario", ""))
+            
+            matriz_rows.append({
+                "Requirement / Use Case": get_safe_text(tc.get("Related Use Case", "")),
+                "Criterion": get_safe_text(tc.get("Criterion", "")),
+                "Scenario": scenario if scenario else description[:50] + "..." if len(description) > 50 else description,
+                "Test Case": get_safe_text(tc.get("ID", "")),
+                "Validation Method": get_safe_text(tc.get("Validation Method", "UI")),
+                "Coverage": get_safe_text(tc.get("Coverage", "Pendiente")),
+                "Alerts": alerts_str
+            })
+        
+        df_matriz = pd.DataFrame(matriz_rows)
+        
+        # ============================================
+        # GUARDAR EXCEL CON AMBAS HOJAS
+        # ============================================
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Usar el nombre de la hoja exacto del ejemplo
+            df_azure.to_excel(writer, sheet_name="28443;Fase 3 - RENK170 Siniestr", index=False)
+            df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
+            
+            # Ajustar anchos de columnas
+            for sheet_name in writer.sheets:
+                worksheet = writer.sheets[sheet_name]
+                # Ajustar automáticamente el ancho de las columnas
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    # Dar un poco más de ancho a las columnas de texto largo
+                    if column_letter in ['D', 'E']:  # StepAction y StepExpected
+                        adjusted_width = min(max_length + 5, 80)
+                    else:
+                        adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        output.seek(0)
+        return output
+        
+    except Exception as e:
+        logger.error(f"Error en create_excel_v8: {str(e)}")
+        raise
 
 # ============================================
 # FUNCIÓN PARA GENERAR PDF - NO CAMBIAR
