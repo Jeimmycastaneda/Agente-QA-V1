@@ -725,9 +725,7 @@ def create_excel_v8(data, config_key):
             test_case_id = base_id + idx
             test_point_id = f"{base_testpoint + idx}:0"
             
-            # ============================================
             # FILA 1: TÍTULO DEL CASO
-            # ============================================
             azure_rows.append({
                 "TestCaseId": test_case_id,
                 "Title": case_title,
@@ -741,9 +739,7 @@ def create_excel_v8(data, config_key):
                 "Comment": ""
             })
             
-            # ============================================
             # FILAS DE STEPS
-            # ============================================
             if not steps:
                 azure_rows.append({
                     "TestCaseId": "",
@@ -763,23 +759,18 @@ def create_excel_v8(data, config_key):
                     step_action = get_safe_text(step.get("Action", ""))
                     step_expected = get_safe_text(step.get("Expected value", ""))
                     
-                    # ============================================
                     # ENRIQUECER STEPS CON USUARIOS
-                    # ============================================
                     if steps_with_users and user_default:
-                        # Buscar palabras clave de usuario
                         user_keywords = ["usuario", "suscriptor", "admin", "operador", "consultor", "validador"]
                         has_user = any(keyword in step_action.lower() for keyword in user_keywords)
                         
                         if not has_user and len(step_action) > 0:
-                            # Si no tiene usuario y hay precondiciones, extraer usuario
                             if "usuario" in preconditions.lower():
                                 user_match = re.search(r'(usuario|suscriptor|admin|operador)\s+([^,\n]+)', preconditions, re.IGNORECASE)
                                 if user_match:
                                     user_type = user_match.group(0).strip()
                                     step_action = f"{step_action} con {user_type}"
                             else:
-                                # Usar usuario por defecto de la configuración
                                 if "ingresar" in step_action.lower() or "login" in step_action.lower() or "acceder" in step_action.lower():
                                     step_action = f"Ingresar con el usuario y contraseña de {user_default}. {step_action}"
                     
@@ -804,10 +795,7 @@ def create_excel_v8(data, config_key):
         
         df_azure = pd.DataFrame(azure_rows)
         
-        # ============================================
         # HOJA 2: MATRIZ QA
-        # ============================================
-        
         matriz_rows = []
         for idx, tc in enumerate(data.get("TEST_CASES", [])):
             alerts_list = tc.get("Alerts", [])
@@ -817,7 +805,6 @@ def create_excel_v8(data, config_key):
             description = get_safe_text(tc.get("Description", ""))
             scenario = get_safe_text(tc.get("Scenario", ""))
             
-            # Enriquecer escenario con usuario
             if steps_with_users and user_default and scenario:
                 if "usuario" not in scenario.lower():
                     scenario = f"{scenario} - {user_default}"
@@ -834,10 +821,7 @@ def create_excel_v8(data, config_key):
         
         df_matriz = pd.DataFrame(matriz_rows)
         
-        # ============================================
         # GUARDAR EXCEL
-        # ============================================
-        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_azure.to_excel(writer, sheet_name=config["sheet_name"], index=False)
             df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
@@ -867,7 +851,7 @@ def create_excel_v8(data, config_key):
         raise
 
 # ============================================
-# FUNCIÓN PARA GENERAR PDF - NO CAMBIAR
+# FUNCIÓN PARA GENERAR PDF
 # ============================================
 
 def sanitize_text_for_pdf(text):
@@ -886,7 +870,7 @@ def sanitize_text_for_pdf(text):
     return text
 
 def create_pdf_v8(data):
-    """Crea PDF con el reporte - NO CAMBIAR"""
+    """Crea PDF con el reporte"""
     try:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -948,3 +932,261 @@ def create_pdf_v8(data):
         story.append(Spacer(1, 20))
         
         test_cases = data.get("TEST_CASES", [])
+        total_cp = len(test_cases)
+        total_alerts = len(data.get("ALERTS", []))
+        
+        story.append(Paragraph("RESUMEN GENERAL", h2_style))
+        story.append(Paragraph(f"Total de Casos de Prueba: {total_cp}", body_style))
+        story.append(Paragraph(f"Total de Alertas Generadas: {total_alerts}", body_style))
+        
+        scenario_types = {}
+        for tc in test_cases:
+            stype = tc.get("Scenario Type", "No definido")
+            scenario_types[stype] = scenario_types.get(stype, 0) + 1
+        
+        if scenario_types:
+            story.append(Spacer(1, 5))
+            story.append(Paragraph("Distribución de Escenarios:", body_style))
+            for stype, count in scenario_types.items():
+                story.append(Paragraph(f"• {stype}: {count} casos", body_style))
+        
+        story.append(Spacer(1, 10))
+        
+        alerts = data.get("ALERTS", [])
+        if alerts:
+            story.append(Paragraph("ALERTAS GENERALES", h2_style))
+            for alert in alerts:
+                alert_text = sanitize_text_for_pdf(alert.get("Alert", ""))
+                reason_text = sanitize_text_for_pdf(alert.get("Reason", ""))
+                validation_text = sanitize_text_for_pdf(alert.get("Validation Required", ""))
+                story.append(Paragraph(f"• <b>{alert_text}</b>: {reason_text}", body_style))
+                if validation_text:
+                    story.append(Paragraph(f"  <i>Validación: {validation_text}</i>", body_style))
+            story.append(Spacer(1, 10))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
+            story.append(Spacer(1, 10))
+        
+        story.append(Paragraph("CASOS DE PRUEBA", h2_style))
+        story.append(Spacer(1, 5))
+        
+        for idx, tc in enumerate(test_cases):
+            tc_id = sanitize_text_for_pdf(tc.get('ID', f'CP-{idx+1:05d}'))
+            tc_title = sanitize_text_for_pdf(tc.get('Title', 'Sin título'))
+            story.append(Paragraph(f"<b>{tc_id}</b>", bold_style))
+            story.append(Paragraph(f"<b>{tc_title}</b>", body_style))
+            
+            desc = sanitize_text_for_pdf(tc.get('Description', 'Sin descripción'))
+            if desc:
+                story.append(Paragraph(f"<b>Descripción:</b> {desc}", body_style))
+            
+            preconditions = sanitize_text_for_pdf(tc.get('Preconditions', 'No definidas'))
+            story.append(Paragraph(f"<b>Precondiciones:</b> {preconditions}", body_style))
+            
+            related_uc = sanitize_text_for_pdf(tc.get('Related Use Case', 'No definido'))
+            scenario = sanitize_text_for_pdf(tc.get('Scenario', 'No definido'))
+            scenario_type = sanitize_text_for_pdf(tc.get('Scenario Type', 'No definido'))
+            effort = sanitize_text_for_pdf(tc.get('Effort', 'No definido'))
+            
+            story.append(Paragraph(
+                f"<b>Requisito:</b> {related_uc} | <b>Escenario:</b> {scenario} ({scenario_type}) | <b>Effort:</b> {effort}",
+                body_style
+            ))
+            story.append(Spacer(1, 5))
+            
+            steps = get_safe_steps(tc)
+            if steps:
+                steps_data = [["Step #", "Action", "Expected Value"]]
+                for step in steps:
+                    action = sanitize_text_for_pdf(step.get("Action", "No definida"))
+                    expected = sanitize_text_for_pdf(step.get("Expected value", "No definido"))
+                    step_num = step.get("Step #", len(steps_data))
+                    steps_data.append([str(step_num), action, expected])
+                
+                t_steps = Table(steps_data, colWidths=[40, 220, 260])
+                t_steps.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#EDF2F7')),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#2D3748')),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0,0), (-1,-1), 8),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ('PADDING', (0,0), (-1,-1), 4),
+                ]))
+                story.append(t_steps)
+            else:
+                story.append(Paragraph("<i>No se definieron steps para este caso</i>", body_style))
+            
+            story.append(Spacer(1, 5))
+            
+            case_alerts = tc.get("Alerts", [])
+            if case_alerts:
+                story.append(Paragraph("<b>ALERTAS:</b>", bold_style))
+                for alert in case_alerts:
+                    alert_text = sanitize_text_for_pdf(alert.get('Alert', ''))
+                    reason = sanitize_text_for_pdf(alert.get('Reason', ''))
+                    validation = sanitize_text_for_pdf(alert.get('Validation Required', ''))
+                    story.append(Paragraph(
+                        f"• <b>{alert_text}</b>: {reason}" + (f" <i>({validation})</i>" if validation else ""),
+                        body_style
+                    ))
+                story.append(Spacer(1, 5))
+            
+            if idx < len(test_cases) - 1:
+                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
+                story.append(Spacer(1, 5))
+        
+        story.append(Spacer(1, 20))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
+        story.append(Paragraph(
+            f"VERSION PREVIA — DRAFT - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            small_style
+        ))
+        story.append(Paragraph("Documento generado automáticamente. Requiere revisión y validación por equipo funcional.", small_style))
+        
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+        
+    except Exception as e:
+        logger.error(f"Error en create_pdf_v8: {str(e)}")
+        raise
+
+# ============================================
+# BOTÓN DE PROCESAMIENTO
+# ============================================
+
+col1, col2, col3 = st.columns([2, 1.5, 2])
+with col2:
+    process_button = st.button(
+        "🚀 Generar Casos de Prueba",
+        type="primary",
+        use_container_width=True,
+        disabled=st.session_state.processing,
+        help="Inicia el análisis del documento y genera casos de prueba"
+    )
+
+# ============================================
+# PROCESAR
+# ============================================
+
+if process_button:
+    text_to_process = source_text or st.session_state.source_content
+    
+    if not api_key:
+        st.error("❌ Por favor ingrese su Gemini API Key o configúrela en Secrets.")
+    elif not text_to_process.strip():
+        st.warning("⚠️ Por favor cargue un archivo o ingrese texto para analizar.")
+    else:
+        st.session_state.processing = True
+        
+        try:
+            result_json = generate_qa_data_with_gemini(
+                system_prompt,
+                text_to_process,
+                api_key,
+                selected_model,
+                temperature,
+                max_retries,
+                wait_time
+            )
+            
+            st.success("✅ Análisis QA generado exitosamente con Gemini 3.6 Flash")
+            
+            with st.spinner("⏳ Generando archivos Excel y PDF..."):
+                excel_file = create_excel_v8(result_json, selected_config)
+                pdf_file = create_pdf_v8(result_json)
+            
+            st.session_state.result_json = result_json
+            st.session_state.last_processed = datetime.now()
+            st.session_state.excel_data = excel_file
+            st.session_state.pdf_data = pdf_file
+            st.session_state.generated_file_name = f"QA_Casos_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            
+            test_cases = result_json.get("TEST_CASES", [])
+            total_steps = sum(len(get_safe_steps(tc)) for tc in test_cases)
+            total_alerts = len(result_json.get("ALERTS", []))
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📋 Casos", len(test_cases))
+            with col2:
+                st.metric("📝 Steps", total_steps)
+            with col3:
+                st.metric("⚠️ Alertas", total_alerts)
+            with col4:
+                st.metric("⏱️ Tiempo", f"{datetime.now() - st.session_state.last_processed if st.session_state.last_processed else 'N/A'}")
+            
+            with st.expander("📊 Resumen de escenarios", expanded=False):
+                scenario_types = {}
+                for tc in test_cases:
+                    stype = tc.get("Scenario Type", "No definido")
+                    scenario_types[stype] = scenario_types.get(stype, 0) + 1
+                
+                for stype, count in scenario_types.items():
+                    st.write(f"**{stype}**: {count} casos")
+            
+            with st.expander("🔍 Ver JSON generado"):
+                st.json(result_json)
+            
+        except Exception as e:
+            st.error(f"❌ Error al procesar: {str(e)}")
+            logger.error(f"Error: {str(e)}")
+            
+            st.info("""
+            💡 **Posibles soluciones:**
+            1. Espera unos minutos y vuelve a intentar (cuota de Gemini)
+            2. Cambia a un modelo diferente en la barra lateral
+            3. Reduce el tamaño del documento
+            4. Verifica que tu API Key sea válida
+            5. Modelo recomendado: gemini-3.6-flash
+            """)
+            
+        finally:
+            st.session_state.processing = False
+
+# ============================================
+# BOTONES FIJOS DE DESCARGA (SIEMPRE VISIBLES)
+# ============================================
+
+st.markdown("---")
+st.markdown('<div class="fixed-buttons">', unsafe_allow_html=True)
+st.subheader("📥 Descargar Archivos Generados")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.session_state.excel_data is not None:
+        st.download_button(
+            label="📥 Descargar Excel (Azure Import + Matriz QA)",
+            data=st.session_state.excel_data,
+            file_name=f"{st.session_state.generated_file_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.info("⏳ Genera casos de prueba para habilitar la descarga")
+
+with col2:
+    if st.session_state.pdf_data is not None:
+        st.download_button(
+            label="📄 Descargar PDF Draft Report",
+            data=st.session_state.pdf_data,
+            file_name=f"{st.session_state.generated_file_name}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+    else:
+        st.info("⏳ Genera casos de prueba para habilitar la descarga")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================
+# FOOTER
+# ============================================
+
+st.divider()
+st.caption("""
+**Agente QA V8** — VERSION PREVIA — DRAFT | 
+Desarrollado con Streamlit y Google Gemini 3.6 Flash | 
+Principios: Trazabilidad + Fidelidad + No Invención
+""")
