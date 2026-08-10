@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from datetime import datetime
 from html import escape
 
@@ -23,7 +24,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V16"
+APP_VERSION = "V17"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
