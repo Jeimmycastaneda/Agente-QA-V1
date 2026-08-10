@@ -21,7 +21,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V12"
+APP_VERSION = "V13"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -733,179 +733,639 @@ def pdf_text(value):
     return escape(safe_text(value)).replace("\n", "<br/>")
 
 
-def create_pdf(data, config_key):
+def _unique_values(cases, key):
+    values = []
+    seen = set()
+    for tc in cases:
+        value = re.sub(r"\s+", " ", safe_text(tc.get(key))).strip()
+        if value and value.lower() not in seen:
+            seen.add(value.lower())
+            values.append(value)
+    return values
+
+
+def _pdf_bullets(story, items, style, prefix="•"):
+    for item in items:
+        text = safe_text(item)
+        if text:
+            story.append(Paragraph(f"{prefix} {pdf_text(text)}", style))
+
+
+def _coverage_summary(data):
+    rows = []
+    for item in data.get("COVERAGE", []) or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append({
+            "Requirement / Use Case": safe_text(item.get("Requirement / Use Case")),
+            "Criterion": safe_text(item.get("Criterion")),
+            "Scenario": safe_text(item.get("Scenario")),
+            "Test Case": safe_text(item.get("Test Case")),
+            "Validation Method": normalize_validation_method(
+                item.get("Validation Method")
+            ),
+            "Coverage": normalize_coverage(item.get("Coverage")),
+            "Alerts": safe_text(item.get("Alerts")),
+        })
+    return rows
+
+
+def create_pdf(data, config_key, source_name=""):
+    """
+    V13 — PDF orientado al formato de Test Plan/Ejecución entregado al cliente.
+
+    No modifica el Excel. El PDF pasa de ser un simple resumen a un
+    documento de planificación QA con:
+      - encabezado VERSION PREVIA — DRAFT;
+      - Descripción del Software;
+      - Objetivos de las pruebas;
+      - Elementos requeridos;
+      - Fuera de alcance;
+      - Entregables;
+      - resumen de cobertura;
+      - detalle de casos de prueba;
+      - SUMMARY por caso;
+      - resultado esperado;
+      - precondiciones;
+      - casos de uso relacionados;
+      - Steps;
+      - alertas y trazabilidad.
+    """
     buffer = io.BytesIO()
 
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36,
+        rightMargin=42,
+        leftMargin=42,
+        topMargin=42,
+        bottomMargin=42,
+        title="Plan de Pruebas QA — VERSION PREVIA — DRAFT",
+        author="Agente QA",
     )
 
     styles = getSampleStyleSheet()
-    title = ParagraphStyle(
-        "title", parent=styles["Heading1"], fontSize=16, leading=19
+
+    cover = ParagraphStyle(
+        "cover",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=20,
+        leading=24,
+        alignment=1,
+        spaceAfter=12,
     )
-    h2 = ParagraphStyle(
-        "h2", parent=styles["Heading2"], fontSize=11, leading=14
+    subtitle = ParagraphStyle(
+        "subtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        alignment=1,
+    )
+    section = ParagraphStyle(
+        "section",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        spaceBefore=10,
+        spaceAfter=6,
+    )
+    subsection = ParagraphStyle(
+        "subsection",
+        parent=styles["Heading3"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=13,
+        spaceBefore=8,
+        spaceAfter=4,
     )
     body = ParagraphStyle(
-        "body", parent=styles["BodyText"], fontSize=8, leading=11
+        "body_v13",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8.2,
+        leading=11,
+        spaceAfter=3,
     )
     small = ParagraphStyle(
-        "small", parent=body, fontSize=7
+        "small_v13",
+        parent=body,
+        fontSize=7,
+        leading=9,
+    )
+    case_title = ParagraphStyle(
+        "case_title_v13",
+        parent=styles["Heading3"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=13,
+        spaceBefore=8,
+        spaceAfter=5,
+    )
+    note = ParagraphStyle(
+        "note_v13",
+        parent=small,
+        fontName="Helvetica-Oblique",
+        spaceBefore=4,
+        spaceAfter=5,
     )
 
+    cases = data.get("TEST_CASES", []) or []
+    alerts = data.get("ALERTS", []) or []
+    coverage = _coverage_summary(data)
+
+    products = _unique_values(cases, "Product")
+    modules = _unique_values(cases, "Module")
+
+    product_text = ", ".join(products) if products else "No definido en la fuente"
+    module_text = ", ".join(modules) if modules else "No definido en la fuente"
+
+    # ========================================================
+    # PORTADA
+    # ========================================================
     story = [
-        Paragraph("VERSION PREVIA — DRAFT", small),
+        Spacer(1, 45),
+        Paragraph("PLAN DE PRUEBAS", cover),
+        Paragraph("Y DETALLE DE CASOS DE PRUEBA", cover),
         Spacer(1, 12),
-        Paragraph("ANÁLISIS DE CASOS DE PRUEBA QA", title),
-        Paragraph(f"Formato: {pdf_text(config_key)}", small),
-        Paragraph(
-            f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            small,
-        ),
-        Spacer(1, 12),
+        Paragraph("VERSION PREVIA — DRAFT", subtitle),
+        Spacer(1, 22),
         HRFlowable(width="100%", thickness=1),
-        Spacer(1, 10),
+        Spacer(1, 15),
+        Paragraph(
+            f"<b>Producto(s):</b> {pdf_text(product_text)}",
+            subtitle,
+        ),
+        Paragraph(
+            f"<b>Módulo(s):</b> {pdf_text(module_text)}",
+            subtitle,
+        ),
+        Paragraph(
+            f"<b>Fuente analizada:</b> {pdf_text(source_name or 'Documentación proporcionada')}",
+            subtitle,
+        ),
+        Paragraph(
+            f"<b>Fecha de generación:</b> "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            subtitle,
+        ),
+        Paragraph(
+            f"<b>Casos de prueba generados:</b> {len(cases)}",
+            subtitle,
+        ),
+        Spacer(1, 22),
+        HRFlowable(width="100%", thickness=1),
+        Spacer(1, 18),
+        Paragraph(
+            "Documento generado para revisión de QA, equipo funcional y negocio.",
+            note,
+        ),
+        Paragraph(
+            "El contenido corresponde a una versión previa y se encuentra "
+            "sujeto a validación humana.",
+            note,
+        ),
+        PageBreak(),
     ]
 
-    cases = data.get("TEST_CASES", [])
-    alerts = data.get("ALERTS", [])
+    # ========================================================
+    # 1. DESCRIPCIÓN DEL SOFTWARE
+    # ========================================================
+    story.append(Paragraph("1. Descripción del Software", section))
+    story.append(
+        Paragraph(
+            "El presente documento contiene la planificación y el detalle de "
+            "las validaciones derivadas de la documentación suministrada para "
+            f"los productos {pdf_text(product_text)} y los módulos "
+            f"{pdf_text(module_text)}.",
+            body,
+        )
+    )
 
-    story.extend([
-        Paragraph("RESUMEN GENERAL", h2),
-        Paragraph(f"Total de Casos de Prueba: {len(cases)}", body),
-        Paragraph(f"Total de Alertas Generales: {len(alerts)}", body),
-        Spacer(1, 10),
-    ])
+    # ========================================================
+    # 2. OBJETIVOS DE LAS PRUEBAS
+    # ========================================================
+    story.append(Paragraph("2. Objetivos de las pruebas", section))
+    objectives = []
+    for tc in cases:
+        scenario = safe_text(tc.get("Scenario"))
+        title_value = build_case_title(
+            tc,
+            safe_text(tc.get("ID"), f"CP-{len(objectives)+1:05d}")
+        )
+        objective = scenario or title_value
+        if objective and objective.lower() not in {
+            x.lower() for x in objectives
+        }:
+            objectives.append(objective)
+
+    _pdf_bullets(story, objectives, body)
+
+    if not objectives:
+        story.append(
+            Paragraph(
+                "No se identificaron objetivos explícitos en la información "
+                "procesada.",
+                note,
+            )
+        )
+
+    # ========================================================
+    # 3. ELEMENTOS REQUERIDOS
+    # ========================================================
+    story.append(Paragraph("3. Elementos requeridos", section))
+    story.append(
+        Paragraph(
+            "Los elementos necesarios para ejecutar cada validación se "
+            "encuentran definidos en las precondiciones y en la documentación "
+            "fuente asociada a cada caso.",
+            body,
+        )
+    )
+
+    # ========================================================
+    # 4. TIPOS DE PRUEBA
+    # ========================================================
+    story.append(Paragraph("4. Tipos de pruebas", section))
+    scenario_types = _unique_values(cases, "Scenario Type")
+    methods = _unique_values(cases, "Validation Method")
+
+    if scenario_types:
+        story.append(
+            Paragraph(
+                f"<b>Tipos de escenario identificados:</b> "
+                f"{pdf_text(', '.join(scenario_types))}.",
+                body,
+            )
+        )
+    if methods:
+        story.append(
+            Paragraph(
+                f"<b>Métodos de validación identificados:</b> "
+                f"{pdf_text(', '.join(methods))}.",
+                body,
+            )
+        )
+
+    # ========================================================
+    # 5. FUERA DE ALCANCE
+    # ========================================================
+    story.append(Paragraph("5. Lista de ítems que no serán probados", section))
+    story.append(
+        Paragraph(
+            "• Cualquier funcionalidad no especificada en la documentación "
+            "fuente proporcionada.",
+            body,
+        )
+    )
+
+    # ========================================================
+    # 6. ENTREGABLES
+    # ========================================================
+    story.append(Paragraph("6. Entregables", section))
+    _pdf_bullets(
+        story,
+        [
+            "Plan de pruebas / detalle de casos de prueba.",
+            "Archivo Excel para revisión QA e importación manual posterior.",
+            "Documento PDF de resumen y detalle QA.",
+            "Alertas y puntos pendientes de validación identificados durante el análisis.",
+        ],
+        body,
+    )
+
+    # ========================================================
+    # 7. RESUMEN DE COBERTURA
+    # ========================================================
+    story.append(Paragraph("7. Resumen de cobertura", section))
+
+    coverage_counts = {
+        "Completa": 0,
+        "Parcial": 0,
+        "No cubierta": 0,
+        "Fuera de alcance": 0,
+        "Pendiente": 0,
+    }
+
+    for row in coverage:
+        label = row["Coverage"] or "Pendiente"
+        coverage_counts[label] = coverage_counts.get(label, 0) + 1
+
+    coverage_rows = [["Cobertura", "Cantidad"]]
+    for label in [
+        "Completa",
+        "Parcial",
+        "No cubierta",
+        "Fuera de alcance",
+        "Pendiente",
+    ]:
+        if coverage_counts.get(label, 0):
+            coverage_rows.append([label, str(coverage_counts[label])])
+
+    if len(coverage_rows) > 1:
+        table = Table(coverage_rows, colWidths=[230, 80], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B8B8B8")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(table)
+    else:
+        story.append(
+            Paragraph(
+                "No se recibió información de cobertura estructurada.",
+                note,
+            )
+        )
+
+    # ========================================================
+    # 8. ALERTAS GENERALES
+    # ========================================================
+    story.append(Paragraph("8. Alertas y puntos de validación", section))
 
     if alerts:
-        story.append(Paragraph("ALERTAS GENERALES", h2))
         for alert in alerts:
+            if not isinstance(alert, dict):
+                continue
+            alert_name = safe_text(alert.get("Alert"), "Alerta")
+            reason = safe_text(alert.get("Reason"))
+            validation = safe_text(alert.get("Validation Required"))
+
             story.append(
                 Paragraph(
-                    f"<b>{pdf_text(alert.get('Alert'))}</b>: "
-                    f"{pdf_text(alert.get('Reason'))}",
+                    f"<b>{pdf_text(alert_name)}</b>",
                     body,
                 )
             )
-            validation = safe_text(alert.get("Validation Required"))
-            if validation:
+            if reason:
                 story.append(
                     Paragraph(
-                        f"Validación requerida: {pdf_text(validation)}",
+                        f"<b>Razón:</b> {pdf_text(reason)}",
                         small,
                     )
                 )
-        story.append(Spacer(1, 10))
+            if validation:
+                story.append(
+                    Paragraph(
+                        f"<b>Validación requerida:</b> {pdf_text(validation)}",
+                        small,
+                    )
+                )
+            story.append(Spacer(1, 3))
+    else:
+        story.append(
+            Paragraph(
+                "No se identificaron alertas generales en el resultado.",
+                note,
+            )
+        )
 
-    story.append(Paragraph("CASOS DE PRUEBA", h2))
+    # ========================================================
+    # 9. DETALLE DE CASOS
+    # ========================================================
+    story.append(PageBreak())
+    story.append(Paragraph("9. DETALLE DE LOS CASOS DE PRUEBA", section))
 
     for idx, tc in enumerate(cases, start=1):
         case_id = safe_text(tc.get("ID"), f"CP-{idx:05d}")
+        title_value = build_case_title(tc, case_id)
 
-        pdf_case_title = build_case_title(tc, case_id)
+        # Encabezado de caso siguiendo el estilo del documento de referencia.
         story.append(
             Paragraph(
-                f"<b>{pdf_text(case_id)}</b> — "
-                f"{pdf_text(pdf_case_title)}",
-                body,
+                f"<b>Test case {pdf_text(case_id)}: "
+                f"{pdf_text(title_value)}</b>",
+                case_title,
             )
         )
 
-        story.append(
-            Paragraph(
-                f"<b>Descripción:</b> {pdf_text(tc.get('Description'))}",
-                body,
-            )
+        story.append(Paragraph("SUMMARY", subsection))
+
+        summary_rows = [
+            ["Producto", safe_text(tc.get("Product")) or "No definido"],
+            ["Módulo", safe_text(tc.get("Module")) or "No definido"],
+            ["Descripción", safe_text(tc.get("Description")) or "No definida"],
+        ]
+
+        summary_table = Table(
+            [
+                [
+                    Paragraph("<b>Campo</b>", small),
+                    Paragraph("<b>Información</b>", small),
+                ]
+            ] + [
+                [
+                    Paragraph(pdf_text(k), small),
+                    Paragraph(pdf_text(v), small),
+                ]
+                for k, v in summary_rows
+            ],
+            colWidths=[105, 435],
+            repeatRows=1,
         )
 
-        story.append(
-            Paragraph(
-                f"<b>Precondiciones:</b> "
-                f"{pdf_text(tc.get('Preconditions'))}",
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B8B8B8")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(summary_table)
+
+        # Resultado esperado
+        expected_result = safe_text(tc.get("Expected Result"))
+        story.append(Paragraph("Resultado esperado de la prueba", subsection))
+
+        if expected_result:
+            story.append(Paragraph(pdf_text(expected_result), body))
+        else:
+            story.append(
+                Paragraph(
+                    "Resultado esperado no definido en la fuente. "
+                    "Validar con el equipo funcional.",
+                    note,
+                )
+            )
+
+        # Precondiciones
+        preconditions = safe_text(tc.get("Preconditions"))
+        story.append(Paragraph("Precondiciones", subsection))
+        if preconditions:
+            _pdf_bullets(
+                story,
+                [x.strip("• ").strip() for x in preconditions.split("\n") if x.strip()],
                 body,
             )
-        )
+        else:
+            story.append(
+                Paragraph(
+                    "No se definieron precondiciones en la fuente.",
+                    note,
+                )
+            )
 
-        story.append(
-            Paragraph(
-                f"<b>Escenario:</b> {pdf_text(tc.get('Scenario'))} | "
-                f"<b>Tipo:</b> {pdf_text(tc.get('Scenario Type'))} | "
-                f"<b>Esfuerzo:</b> {pdf_text(tc.get('Effort'))}",
+        # Caso de uso
+        related_use_case = safe_text(tc.get("Related Use Case"))
+        story.append(Paragraph("Casos de Uso relacionados", subsection))
+        if related_use_case:
+            _pdf_bullets(
+                story,
+                [
+                    x.strip("• ").strip()
+                    for x in related_use_case.split("\n")
+                    if x.strip()
+                ],
                 body,
             )
-        )
+        else:
+            story.append(
+                Paragraph(
+                    "No se identificó un caso de uso relacionado en la fuente.",
+                    note,
+                )
+            )
 
+        # Metadatos QA
+        metadata = [
+            ("Escenario", safe_text(tc.get("Scenario"))),
+            ("Tipo de escenario", safe_text(tc.get("Scenario Type"))),
+            ("Método de validación", normalize_validation_method(
+                tc.get("Validation Method")
+            )),
+            ("Cobertura", normalize_coverage(tc.get("Coverage"))),
+            ("Esfuerzo", safe_text(tc.get("Effort"))),
+        ]
+
+        meta_rows = [
+            [Paragraph("<b>Dato QA</b>", small),
+             Paragraph("<b>Valor</b>", small)]
+        ]
+
+        for label, value in metadata:
+            if value:
+                meta_rows.append([
+                    Paragraph(pdf_text(label), small),
+                    Paragraph(pdf_text(value), small),
+                ])
+
+        if len(meta_rows) > 1:
+            meta_table = Table(
+                meta_rows,
+                colWidths=[140, 400],
+                repeatRows=1,
+            )
+            meta_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8C8C8")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("PADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(meta_table)
+
+        # Steps
+        story.append(Paragraph("Steps de ejecución", subsection))
         steps = safe_steps(tc)
 
         if steps:
-            rows = [["Step #", "Action", "Expected Value"]]
+            step_rows = [
+                [
+                    Paragraph("<b>Step</b>", small),
+                    Paragraph("<b>Acción</b>", small),
+                    Paragraph("<b>Resultado esperado</b>", small),
+                ]
+            ]
 
             for step in steps:
-                rows.append([
-                    safe_text(step.get("Step #")),
-                    Paragraph(pdf_text(step.get("Action")), body),
-                    Paragraph(pdf_text(step.get("Expected value")), body),
+                step_rows.append([
+                    Paragraph(pdf_text(step.get("Step #")), small),
+                    Paragraph(pdf_text(step.get("Action")), small),
+                    Paragraph(pdf_text(step.get("Expected value")), small),
                 ])
 
-            table = Table(
-                rows,
-                colWidths=[45, 230, 245],
+            step_table = Table(
+                step_rows,
+                colWidths=[42, 245, 253],
                 repeatRows=1,
             )
 
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E0")),
+            step_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B8B8B8")),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("FONTSIZE", (0, 0), (-1, -1), 7),
                 ("PADDING", (0, 0), (-1, -1), 4),
             ]))
 
-            story.append(table)
+            story.append(step_table)
         else:
             story.append(
                 Paragraph(
-                    "<i>No se definieron steps para este caso.</i>",
-                    body,
+                    "No se definieron Steps en la fuente.",
+                    note,
                 )
             )
 
+        # Alertas del caso
         case_alerts = tc.get("Alerts", [])
-
         if isinstance(case_alerts, list) and case_alerts:
-            story.append(Paragraph("<b>Alertas del caso:</b>", body))
+            story.append(Paragraph("Alertas del caso", subsection))
 
             for alert in case_alerts:
+                if not isinstance(alert, dict):
+                    continue
                 story.append(
                     Paragraph(
-                        f"• {pdf_text(alert.get('Alert'))}: "
-                        f"{pdf_text(alert.get('Reason'))} | "
-                        f"{pdf_text(alert.get('Validation Required'))}",
+                        f"• <b>{pdf_text(alert.get('Alert'))}</b> — "
+                        f"{pdf_text(alert.get('Reason'))}",
                         small,
                     )
                 )
+                validation = safe_text(alert.get("Validation Required"))
+                if validation:
+                    story.append(
+                        Paragraph(
+                            f"&nbsp;&nbsp;Validación requerida: "
+                            f"{pdf_text(validation)}",
+                            small,
+                        )
+                    )
 
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 12))
 
         if idx < len(cases):
             story.append(HRFlowable(width="100%", thickness=0.5))
             story.append(Spacer(1, 8))
 
-    story.extend([
-        Spacer(1, 15),
-        HRFlowable(width="100%", thickness=1),
+    # ========================================================
+    # 10. CIERRE
+    # ========================================================
+    story.append(PageBreak())
+    story.append(Paragraph("10. Consideraciones y cierre", section))
+    story.append(
         Paragraph(
-            "Documento generado automáticamente. "
-            "Requiere revisión y validación por el equipo funcional.",
-            small,
-        ),
-    ])
+            "Este documento corresponde a una VERSION PREVIA — DRAFT. "
+            "Los casos de prueba, resultados esperados, cobertura, "
+            "precondiciones y alertas deben ser revisados por QA, equipo "
+            "funcional y negocio antes de su ejecución o importación.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "Ante información faltante o ambigua, el documento conserva la "
+            "alerta correspondiente y no asume comportamiento no respaldado "
+            "por la fuente.",
+            body,
+        )
+    )
 
     doc.build(story)
     buffer.seek(0)
@@ -1075,6 +1535,7 @@ if st.button(
         st.session_state.pdf_data = create_pdf(
             result,
             selected_config,
+            st.session_state.get("source_name", ""),
         )
 
         st.success(
