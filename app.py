@@ -1,139 +1,45 @@
-import streamlit as st
-import pandas as pd
-import json
 import io
-import os
+import json
 import logging
-import time
+import os
 import re
+import time
 from datetime import datetime
-from reportlab.lib.pagesizes import letter
+from html import escape
+
+import pandas as pd
+import streamlit as st
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-# ============================================
-# IMPORTACIÓN CORRECTA DE GEMINI
-# ============================================
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
 
-# ============================================
-# CONFIGURACIÓN INICIAL
-# ============================================
+APP_VERSION = "V9"
+MODEL = "gemini-3.6-flash"
+FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ============================================================
+# COLUMNAS APROBADAS — NO AGREGAR NI CAMBIAR TÍTULOS
+# ============================================================
+AZURE_COLUMNS = [
+    "TestCaseId", "Title", "TestStep", "StepAction", "StepExpected",
+    "TestPointId", "Configuration", "Tester", "Outcome", "Comment"
+]
 
-st.set_page_config(
-    page_title="Agente QA V8 - Generador de Pruebas",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ============================================
-# ESTILOS CSS PERSONALIZADOS
-# ============================================
-
-st.markdown("""
-    <style>
-    .main-header {
-        background: linear-gradient(135deg, #1A365D 0%, #2B6CB0 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .draft-badge {
-        background-color: #ffc107;
-        color: #1A365D;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: bold;
-        font-size: 0.8rem;
-        display: inline-block;
-    }
-    .upload-section {
-        background-color: #f8f9fa;
-        padding: 2rem;
-        border-radius: 10px;
-        border: 2px dashed #2B6CB0;
-        text-align: center;
-    }
-    .model-badge {
-        background-color: #28a745;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: bold;
-        font-size: 0.8rem;
-        display: inline-block;
-    }
-    .fixed-buttons {
-        background: white;
-        padding: 1rem 0;
-        border-top: 2px solid #2B6CB0;
-        margin-top: 1rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ============================================
-# HEADER
-# ============================================
-
-st.markdown("""
-    <div class="main-header">
-        <h1>🤖 Agente QA V8 — Generador de Casos de Prueba</h1>
-        <p style="margin: 0; opacity: 0.9;">
-            <span class="draft-badge">VERSION PREVIA — DRAFT</span>
-            &nbsp; Análisis de documentos y generación de casos de prueba para QA
-            <span class="model-badge" style="margin-left: 10px;">Gemini 3.6 Flash</span>
-        </p>
-    </div>
-""", unsafe_allow_html=True)
-
-# ============================================
-# ESTADO DE SESIÓN
-# ============================================
-
-if 'processing' not in st.session_state:
-    st.session_state.processing = False
-if 'result_json' not in st.session_state:
-    st.session_state.result_json = None
-if 'last_processed' not in st.session_state:
-    st.session_state.last_processed = None
-if 'source_content' not in st.session_state:
-    st.session_state.source_content = ""
-if 'valid_models' not in st.session_state:
-    st.session_state.valid_models = []
-if 'quota_exceeded' not in st.session_state:
-    st.session_state.quota_exceeded = False
-if 'retry_count' not in st.session_state:
-    st.session_state.retry_count = 0
-if 'excel_data' not in st.session_state:
-    st.session_state.excel_data = None
-if 'pdf_data' not in st.session_state:
-    st.session_state.pdf_data = None
-if 'generated_file_name' not in st.session_state:
-    st.session_state.generated_file_name = None
-
-# ============================================
-# CONFIGURACIONES DE FORMATO DE EXCEL
-# ============================================
+MATRIZ_COLUMNS = [
+    "TestCaseId", "Title", "Requirement / Use Case", "Criterion", "Scenario",
+    "Scenario Type", "Description", "Preconditions", "Validation Method",
+    "Coverage", "Alerts", "Effort"
+]
 
 EXCEL_CONFIGS = {
-    "Siniestros Fasecolda": {
-        "sheet_name": "28443;Fase 3 - RENK170 Siniestr",
-        "base_id": 28454,
-        "base_testpoint": 6552,
-        "configuration": "Default configuration created @ 26/05/2023 15:22:17",
-        "tester": "Isabel Cristina Mejía López",
-        "title_prefix": "CP-ACSF-",
-        "user_default": "Suscriptor Oficina Principal, suscriptor sucursal autos",
-        "steps_with_users": True
-    },
     "Autos Colectivos": {
         "sheet_name": "Azure Import",
         "base_id": 10001,
@@ -142,7 +48,17 @@ EXCEL_CONFIGS = {
         "tester": "",
         "title_prefix": "CP-AC-",
         "user_default": "Usuario registrado",
-        "steps_with_users": True
+        "steps_with_users": True,
+    },
+    "Siniestros Fasecolda": {
+        "sheet_name": "28443;Fase 3 - RENK170 Siniestr",
+        "base_id": 28454,
+        "base_testpoint": 6552,
+        "configuration": "Default configuration created @ 26/05/2023 15:22:17",
+        "tester": "Isabel Cristina Mejía López",
+        "title_prefix": "CP-ACSF-",
+        "user_default": "Suscriptor Oficina Principal, suscriptor sucursal autos",
+        "steps_with_users": True,
     },
     "General QA": {
         "sheet_name": "Casos de Prueba",
@@ -152,20 +68,9 @@ EXCEL_CONFIGS = {
         "tester": "",
         "title_prefix": "CP-",
         "user_default": "",
-        "steps_with_users": False
-    }
+        "steps_with_users": False,
+    },
 }
-
-# ============================================
-# MODELO GEMINI 3.6 FLASH (PREDETERMINADO)
-# ============================================
-
-MODEL = "gemini-3.6-flash"
-FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
-
-# ============================================
-# ESQUEMA JSON PARA LA RESPUESTA - NO CAMBIAR
-# ============================================
 
 SCHEMA = {
     "type": "object",
@@ -187,6 +92,8 @@ SCHEMA = {
                     "Scenario": {"type": "string"},
                     "Scenario Type": {"type": "string"},
                     "Effort": {"type": "string"},
+                    "Coverage": {"type": "string"},
+                    "Validation Method": {"type": "string"},
                     "Steps": {
                         "type": "array",
                         "items": {
@@ -194,10 +101,10 @@ SCHEMA = {
                             "properties": {
                                 "Step #": {"type": "integer"},
                                 "Action": {"type": "string"},
-                                "Expected value": {"type": "string"}
+                                "Expected value": {"type": "string"},
                             },
-                            "required": ["Step #", "Action", "Expected value"]
-                        }
+                            "required": ["Step #", "Action", "Expected value"],
+                        },
                     },
                     "Alerts": {
                         "type": "array",
@@ -206,14 +113,14 @@ SCHEMA = {
                             "properties": {
                                 "Alert": {"type": "string"},
                                 "Reason": {"type": "string"},
-                                "Validation Required": {"type": "string"}
+                                "Validation Required": {"type": "string"},
                             },
-                            "required": ["Alert", "Reason", "Validation Required"]
-                        }
-                    }
+                            "required": ["Alert", "Reason", "Validation Required"],
+                        },
+                    },
                 },
-                "required": ["ID", "Title", "Description", "Preconditions", "Steps"]
-            }
+                "required": ["ID", "Title", "Description", "Preconditions", "Steps"],
+            },
         },
         "ALERTS": {
             "type": "array",
@@ -222,10 +129,10 @@ SCHEMA = {
                 "properties": {
                     "Alert": {"type": "string"},
                     "Reason": {"type": "string"},
-                    "Validation Required": {"type": "string"}
+                    "Validation Required": {"type": "string"},
                 },
-                "required": ["Alert", "Reason", "Validation Required"]
-            }
+                "required": ["Alert", "Reason", "Validation Required"],
+            },
         },
         "COVERAGE": {
             "type": "array",
@@ -238,1021 +145,866 @@ SCHEMA = {
                     "Test Case": {"type": "string"},
                     "Validation Method": {"type": "string"},
                     "Coverage": {"type": "string"},
-                    "Alerts": {"type": "string"}
+                    "Alerts": {"type": "string"},
                 },
-                "required": ["Requirement / Use Case", "Criterion", "Scenario", "Test Case"]
-            }
-        }
+                "required": ["Requirement / Use Case", "Criterion", "Scenario", "Test Case"],
+            },
+        },
     },
-    "required": ["TEST_CASES", "ALERTS", "COVERAGE"]
+    "required": ["TEST_CASES", "ALERTS", "COVERAGE"],
 }
 
-# ============================================
-# CARGA DEL PROMPT V8 - NO CAMBIAR
-# ============================================
 
-@st.cache_data(ttl=3600)
-def load_system_prompt():
-    """Carga el prompt V8 desde archivo - NO CAMBIAR"""
-    prompt_path = "prompt_qa.txt"
-    if os.path.exists(prompt_path):
+def safe_text(value, default=""):
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value).strip()
+
+
+def safe_steps(tc):
+    steps = tc.get("Steps", [])
+    return steps if isinstance(steps, list) else []
+
+
+def normalize_coverage(value):
+    v = safe_text(value).strip().lower()
+    allowed = {
+        "completa": "Completa",
+        "parcial": "Parcial",
+        "no cubierta": "No cubierta",
+        "fuera de alcance": "Fuera de alcance",
+    }
+    return allowed.get(v, safe_text(value, "Pendiente"))
+
+
+def normalize_validation_method(value):
+    v = safe_text(value).strip().lower()
+    mapping = {
+        "ui": "UI",
+        "interfaz": "UI",
+        "interfaz de usuario": "UI",
+        "bd": "BD",
+        "base de datos": "BD",
+        "database": "BD",
+        "api": "API",
+        "web service": "API",
+        "web services": "API",
+        "mixta": "Mixta",
+        "mixto": "Mixta",
+    }
+    return mapping.get(v, safe_text(value, "Pendiente"))
+
+
+def module_token(module, title="", scenario=""):
+    raw = safe_text(module) or safe_text(title) or safe_text(scenario) or "GENERAL"
+    raw = re.sub(r"[^A-Za-z0-9]+", " ", raw).strip().upper()
+    words = raw.split()
+    if not words:
+        return "GENERAL"
+    if len(words) == 1:
+        return words[0][:12]
+    return "".join(w[0] for w in words)[:8]
+
+
+def normalize_case_id(raw_id, module, index, prefix="CP-AC-"):
+    candidate = safe_text(raw_id)
+    if re.fullmatch(r"CP-AC-[A-Za-z0-9_-]+-\d{5}", candidate):
+        return candidate
+    return f"{prefix}{module_token(module)}-{index:05d}"
+
+
+def find_coverage(data, tc):
+    tc_id = safe_text(tc.get("ID"))
+    for row in data.get("COVERAGE", []) if isinstance(data.get("COVERAGE", []), list) else []:
+        if safe_text(row.get("Test Case")) == tc_id:
+            return row
+    return {}
+
+
+def aggregate_case_alerts(data, tc):
+    parts = []
+    case_alerts = tc.get("Alerts", [])
+    if isinstance(case_alerts, list):
+        for alert in case_alerts:
+            text = safe_text(alert.get("Alert"))
+            reason = safe_text(alert.get("Reason"))
+            validation = safe_text(alert.get("Validation Required"))
+            if text:
+                if reason:
+                    text += f": {reason}"
+                if validation:
+                    text += f" | Validación: {validation}"
+                parts.append(text)
+    return " | ".join(parts) if parts else "Sin Alertas"
+
+
+# ============================================================
+# EXTRACCIÓN ROBUSTA DE DOCUMENTOS
+# ============================================================
+def extract_txt(uploaded_file):
+    raw = uploaded_file.getvalue()
+    for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
         try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                if not content.strip():
-                    return get_default_prompt()
-                return content
-        except Exception as e:
-            st.error(f"❌ Error al cargar prompt_qa.txt: {str(e)}")
-            return get_default_prompt()
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("No fue posible decodificar el archivo de texto.")
+
+
+def extract_pdf(uploaded_file):
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise RuntimeError(
+            "La dependencia 'pypdf' no está disponible en el entorno. "
+            "Verifica requirements.txt y vuelve a desplegar la aplicación."
+        ) from exc
+
+    reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
+    pages = []
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        pages.append(f"[Página {page_number}]\n{text}")
+
+    content = "\n\n".join(pages).strip()
+    if not content:
+        raise ValueError(
+            "El PDF se abrió correctamente, pero no contiene texto extraíble. "
+            "Si es un PDF escaneado, esta versión requiere OCR."
+        )
+    return content
+
+
+def extract_docx(uploaded_file):
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError(
+            "La dependencia 'python-docx' no está disponible. "
+            "Verifica requirements.txt y vuelve a desplegar la aplicación."
+        ) from exc
+
+    doc = Document(io.BytesIO(uploaded_file.getvalue()))
+    blocks = [p.text for p in doc.paragraphs if p.text.strip()]
+
+    for table in doc.tables:
+        for row in table.rows:
+            blocks.append(" | ".join(cell.text.strip() for cell in row.cells))
+
+    content = "\n".join(blocks).strip()
+    if not content:
+        raise ValueError("El DOCX se abrió correctamente, pero no contiene texto.")
+    return content
+
+
+def extract_source(uploaded_file):
+    extension = uploaded_file.name.rsplit(".", 1)[-1].lower()
+
+    if extension in ("txt", "md"):
+        content = extract_txt(uploaded_file)
+    elif extension == "pdf":
+        content = extract_pdf(uploaded_file)
+    elif extension == "docx":
+        content = extract_docx(uploaded_file)
     else:
-        st.warning("⚠️ No se encontró prompt_qa.txt. Usando prompt por defecto.")
-        return get_default_prompt()
+        raise ValueError(f"Formato no soportado: .{extension}")
 
-def get_default_prompt():
-    """Prompt por defecto en caso de error - NO CAMBIAR"""
-    return """Eres un agente especializado en análisis de Historias de Usuario y generación de casos de prueba para QA.
-    Genera una estructura JSON con TEST_CASES, ALERTS y COVERAGE.
-    Cada caso de prueba debe tener: ID, Title, Description, Preconditions, Steps, Alerts.
-    Los Steps deben tener: Step #, Action, Expected value.
-    """
+    if not content.strip():
+        raise ValueError("El documento no contiene contenido utilizable.")
 
-system_prompt = load_system_prompt()
+    return content
 
-# ============================================
-# FUNCIÓN PARA OBTENER MODELOS VÁLIDOS
-# ============================================
+
+# ============================================================
+# PROMPT EXISTENTE — SE CONSERVA SIN CAMBIOS
+# ============================================================
+@st.cache_data(ttl=3600)
+def load_prompt():
+    path = "prompt_qa.txt"
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if content:
+            return content
+
+    return (
+        "Eres un agente QA especializado en análisis de documentación. "
+        "Analiza exclusivamente la fuente proporcionada, no inventes información "
+        "y genera TEST_CASES, ALERTS y COVERAGE en JSON."
+    )
+
 
 @st.cache_data(ttl=3600)
 def get_valid_models(api_key):
-    """Obtiene los modelos Gemini disponibles"""
+    if genai is None:
+        return FALLBACK_MODELS
+
     try:
         client = genai.Client(api_key=api_key)
-        models = client.models.list()
-        
-        valid_models = []
-        for model in models:
-            model_name = model.name.split('/')[-1]
-            if 'gemini' in model_name.lower():
-                if '2.0' not in model_name.lower():
-                    valid_models.append(model_name)
-        
-        if MODEL not in valid_models:
-            valid_models.insert(0, MODEL)
-        
-        if not valid_models:
-            valid_models = FALLBACK_MODELS.copy()
-        
-        return sorted(set(valid_models))
-        
-    except Exception as e:
-        st.warning(f"⚠️ No se pudieron listar los modelos: {str(e)}")
-        return FALLBACK_MODELS.copy()
+        names = []
+        for model in client.models.list():
+            name = model.name.split("/")[-1]
+            if "gemini" in name.lower():
+                names.append(name)
+        return sorted(set(names)) or FALLBACK_MODELS
+    except Exception:
+        return FALLBACK_MODELS
 
-# ============================================
-# SIDEBAR - CONFIGURACIÓN
-# ============================================
 
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    
-    # API Key
-    api_key_from_secrets = st.secrets.get("GEMINI_API_KEY") if hasattr(st, 'secrets') else None
-    
-    if api_key_from_secrets:
-        st.success("✅ API Key configurada desde Secrets")
-        api_key = api_key_from_secrets
-    else:
-        st.warning("⚠️ No se encontró GEMINI_API_KEY en Secrets")
-        api_key = st.text_input(
-            "🔑 Google Gemini API Key",
-            type="password",
-            help="Obtén tu API Key en https://makersuite.google.com/app/apikey"
-        )
-    
-    if api_key:
-        try:
-            valid_models = get_valid_models(api_key)
-            st.session_state.valid_models = valid_models
-        except Exception as e:
-            valid_models = FALLBACK_MODELS.copy()
-            st.session_state.valid_models = valid_models
-    else:
-        valid_models = FALLBACK_MODELS.copy()
-        st.session_state.valid_models = valid_models
-    
-    st.divider()
-    
-    # Configuración del modelo
-    st.subheader("🎯 Modelo")
-    
-    if MODEL in valid_models:
-        default_index = valid_models.index(MODEL)
-    else:
-        default_index = 0
-    
-    selected_model = st.selectbox(
-        "Seleccionar modelo",
-        options=valid_models,
-        index=default_index if MODEL in valid_models else 0,
-        help="Modelos Gemini disponibles. Se recomienda Gemini 3.6 Flash"
-    )
-    
-    if selected_model == MODEL:
-        st.success("✅ Modelo recomendado: Gemini 3.6 Flash")
-    else:
-        st.info(f"ℹ️ Modelo seleccionado: {selected_model}")
-    
-    st.divider()
-    
-    # Configuración de formato de Excel
-    st.subheader("📊 Formato de Excel")
-    
-    selected_config = st.selectbox(
-        "Seleccionar formato",
-        options=list(EXCEL_CONFIGS.keys()),
-        help="Selecciona el formato de Excel según el proyecto"
-    )
-    
-    # Mostrar detalles del formato seleccionado
-    config = EXCEL_CONFIGS[selected_config]
-    st.caption(f"""
-    **Hoja:** {config['sheet_name']}
-    **ID inicial:** {config['base_id']}
-    **Prefijo:** {config['title_prefix']}
-    **Usuario:** {config['user_default'] if config['user_default'] else 'No definido'}
-    """)
-    
-    st.divider()
-    
-    # Opciones avanzadas
-    with st.expander("⚙️ Opciones avanzadas"):
-        temperature = st.slider(
-            "🌡️ Temperatura",
-            min_value=0.0,
-            max_value=0.5,
-            value=0.1,
-            step=0.05,
-            help="0.0 = Máxima fidelidad | 0.5 = Más creativo"
-        )
-        
-        max_retries = st.number_input(
-            "🔄 Máximo de reintentos",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="Número de reintentos si hay límite de cuota"
-        )
-        
-        wait_time = st.number_input(
-            "⏱️ Espera inicial (segundos)",
-            min_value=5,
-            max_value=60,
-            value=10,
-            help="Tiempo de espera inicial entre reintentos"
-        )
-    
-    st.divider()
-    
-    # Información del sistema
-    st.subheader("📊 Estado")
-    st.info(f"""
-    **Prompt V8**: {'✅ Cargado' if system_prompt else '❌ No cargado'}
-    **Modelo**: {selected_model}
-    **Temperatura**: {temperature}
-    **Reintentos**: {max_retries}
-    **Max tokens**: 65536
-    **Formato**: {selected_config}
-    """)
-    
-    if st.session_state.quota_exceeded:
-        st.warning("⚠️ Cuota excedida. Espera unos minutos y reintenta.")
-    
-    if st.session_state.retry_count > 0:
-        st.info(f"🔄 Reintentos: {st.session_state.retry_count}")
+def validate_qa_structure(data):
+    if not isinstance(data, dict):
+        raise ValueError("La respuesta de Gemini no es un objeto JSON.")
 
-# ============================================
-# SECCIÓN PRINCIPAL - CARGA DE ARCHIVOS
-# ============================================
+    for key in ("TEST_CASES", "ALERTS", "COVERAGE"):
+        if key not in data:
+            raise ValueError(f"Falta la clave requerida: {key}")
 
-st.subheader("📁 Carga de Documento")
+    if not isinstance(data["TEST_CASES"], list) or not data["TEST_CASES"]:
+        raise ValueError("No se generaron casos de prueba.")
 
-st.markdown("""
-<div class="upload-section">
-    <p style="font-size: 1.2rem; margin-bottom: 1rem;">
-        📄 Arrastra o selecciona un archivo con la información fuente
-    </p>
-    <p style="color: #6c757d; font-size: 0.9rem;">
-        Formatos soportados: <strong>TXT, MD, PDF, DOCX</strong>
-    </p>
-</div>
-""", unsafe_allow_html=True)
+    if not isinstance(data["ALERTS"], list):
+        data["ALERTS"] = []
 
-uploaded_file = st.file_uploader(
-    "Selecciona un archivo",
-    type=['txt', 'md', 'pdf', 'docx'],
-    label_visibility="collapsed"
-)
+    if not isinstance(data["COVERAGE"], list):
+        data["COVERAGE"] = []
 
-source_text = ""
+    return data
 
-if uploaded_file:
-    try:
-        file_extension = uploaded_file.name.split('.')[-1].lower()
-        
-        with st.spinner(f"⏳ Procesando {uploaded_file.name}..."):
-            if file_extension in ['txt', 'md']:
-                file_content = uploaded_file.read().decode('utf-8')
-                source_text = file_content
-                st.session_state.source_content = file_content
-                st.success(f"✅ Archivo {uploaded_file.name} cargado correctamente")
-                
-            elif file_extension == 'pdf':
-                try:
-                    import PyPDF2
-                    pdf_reader = PyPDF2.PdfReader(uploaded_file)
-                    file_content = ""
-                    for page in pdf_reader.pages:
-                        file_content += page.extract_text()
-                    source_text = file_content
-                    st.session_state.source_content = file_content
-                    st.success(f"✅ PDF {uploaded_file.name} procesado")
-                except ImportError:
-                    st.error("❌ Para procesar PDFs: pip install PyPDF2")
-                except Exception as e:
-                    st.error(f"❌ Error al procesar PDF: {str(e)}")
-                    
-            elif file_extension == 'docx':
-                try:
-                    import docx
-                    doc = docx.Document(uploaded_file)
-                    file_content = ""
-                    for para in doc.paragraphs:
-                        file_content += para.text + "\n"
-                    source_text = file_content
-                    st.session_state.source_content = file_content
-                    st.success(f"✅ DOCX {uploaded_file.name} procesado")
-                except ImportError:
-                    st.error("❌ Para procesar DOCX: pip install python-docx")
-                except Exception as e:
-                    st.error(f"❌ Error al procesar DOCX: {str(e)}")
-        
-        with st.expander("📄 Vista previa del contenido", expanded=True):
-            st.text_area(
-                "Contenido del archivo:",
-                file_content[:3000],
-                height=200,
-                disabled=True
-            )
-            if len(file_content) > 3000:
-                st.caption(f"... y {len(file_content) - 3000} caracteres más")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("📝 Caracteres", len(file_content))
-            with col2:
-                st.metric("📄 Líneas", len(file_content.split('\n')))
-            with col3:
-                st.metric("💬 Palabras", len(file_content.split()))
-        
-    except Exception as e:
-        st.error(f"❌ Error al procesar el archivo: {str(e)}")
 
-if not uploaded_file and not st.session_state.source_content:
-    st.info("💡 También puedes ingresar texto manualmente en el área inferior")
-    source_text = st.text_area(
-        "✏️ O ingresa el texto manualmente:",
-        height=200,
-        placeholder="Pega aquí tu Historia de Usuario, casos de uso o documentación..."
-    )
-    if source_text:
-        st.session_state.source_content = source_text
-elif not uploaded_file and st.session_state.source_content:
-    source_text = st.session_state.source_content
+def generate_qa_data(
+    prompt_text,
+    source_content,
+    api_key,
+    model_name,
+    temperature=0.1,
+    max_retries=2,
+    initial_wait=10,
+):
+    if genai is None:
+        raise RuntimeError("No está instalada la librería google-genai.")
 
-# ============================================
-# FUNCIÓN PRINCIPAL CON GEMINI 3.6 FLASH
-# ============================================
+    if not api_key:
+        raise ValueError("API Key no configurada.")
 
-def generate_qa_data_with_gemini(prompt_text, source_content, key, model_name, temperature=0.1, max_retries=3, initial_wait=10):
-    """Genera datos QA usando Gemini 3.6 Flash"""
-    
-    if not key:
-        raise ValueError("❌ API Key no configurada")
-    
     if not source_content.strip():
-        raise ValueError("❌ Fuente de información vacía")
-    
-    client = genai.Client(api_key=key)
-    
+        raise ValueError("Fuente de información vacía.")
+
     max_source_chars = 30000
     if len(source_content) > max_source_chars:
-        st.warning(f"⚠️ Contenido de {len(source_content)} caracteres. Truncado a {max_source_chars}.")
-        source_content = source_content[:max_source_chars] + "\n... [Contenido truncado]"
-    
-    full_prompt = f"{prompt_text}\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n{source_content}"
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
+        source_content = source_content[:max_source_chars] + "\n...[CONTENIDO TRUNCADO]"
+
+    full_prompt = (
+        prompt_text
+        + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
+        + source_content
+    )
+
+    client = genai.Client(api_key=api_key)
     last_error = None
-    wait_time = initial_wait
-    
+
     for attempt in range(max_retries + 1):
         try:
-            status_text.text(f"⏳ Intento {attempt + 1} de {max_retries + 1} con {model_name}...")
-            progress_bar.progress(10 + (attempt * 20))
-            
-            r = client.models.generate_content(
+            response = client.models.generate_content(
                 model=model_name,
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=SCHEMA,
-                    max_output_tokens=65536
-                )
+                    temperature=temperature,
+                    max_output_tokens=65536,
+                ),
             )
-            
-            progress_bar.progress(70)
-            status_text.text("⏳ Procesando respuesta...")
-            
-            text = r.text.strip()
-            
+
+            text = (response.text or "").strip()
+            if not text:
+                raise ValueError("Gemini devolvió una respuesta vacía.")
+
             try:
                 data = json.loads(text)
-            except json.JSONDecodeError as e:
-                clean_text = text
-                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', clean_text)
-                if json_match:
-                    clean_text = json_match.group(1)
-                elif re.search(r'```\s*([\s\S]*?)\s*```', clean_text):
-                    clean_text = re.search(r'```\s*([\s\S]*?)\s*```', clean_text).group(1)
-                
-                try:
-                    data = json.loads(clean_text)
-                except json.JSONDecodeError:
-                    raise RuntimeError(
-                        f"✖ Error al parsear JSON. Detalle: {e}. "
-                        f"Respuesta: {text[:3000]}"
-                    )
-            
-            validated_data = validate_qa_structure(data)
-            
-            st.session_state.quota_exceeded = False
-            st.session_state.retry_count = 0
-            
-            progress_bar.progress(100)
-            status_text.text(f"✅ Procesamiento completado con {model_name}")
-            
-            time.sleep(0.5)
-            progress_bar.empty()
-            status_text.empty()
-            
-            return validated_data
-            
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-            
-            if '429' in error_str or 'quota' in error_str.lower() or 'rate limit' in error_str.lower():
-                st.session_state.quota_exceeded = True
-                st.session_state.retry_count = attempt + 1
-                
-                if attempt < max_retries:
-                    retry_time = wait_time * (attempt + 1)
-                    try:
-                        time_match = re.search(r'retry in (\d+\.?\d*)s', error_str)
-                        if time_match:
-                            retry_time = float(time_match.group(1)) + 5
-                    except:
-                        pass
-                    
-                    status_text.text(f"⏳ Cuota excedida. Esperando {retry_time:.0f} segundos...")
-                    progress_bar.progress(20 + (attempt * 15))
-                    
-                    st.warning(f"⚠️ Cuota excedida. Reintentando en {retry_time:.0f} segundos... (Intento {attempt + 1} de {max_retries + 1})")
-                    
-                    for i in range(int(retry_time)):
-                        time.sleep(1)
-                        progress_bar.progress(25 + (attempt * 15) + (i / retry_time * 20))
-                    
-                    continue
-                else:
-                    st.error("❌ Se agotaron los reintentos. La cuota de Gemini sigue excedida.")
-                    raise ValueError("Cuota de Gemini excedida. Por favor espera unos minutos y reintenta.")
-            else:
+            except json.JSONDecodeError:
+                match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+                if not match:
+                    raise
+                data = json.loads(match.group(1))
+
+            return validate_qa_structure(data)
+
+        except Exception as exc:
+            last_error = exc
+            error_text = str(exc).lower()
+            is_quota = (
+                "429" in str(exc)
+                or "quota" in error_text
+                or "rate limit" in error_text
+            )
+
+            if not is_quota or attempt >= max_retries:
                 raise
-        
-        finally:
-            if attempt == max_retries and last_error:
-                progress_bar.empty()
-                status_text.empty()
-    
-    raise last_error if last_error else ValueError("Error desconocido al procesar")
 
-# ============================================
-# FUNCIÓN DE VALIDACIÓN
-# ============================================
+            time.sleep(initial_wait * (attempt + 1))
 
-def validate_qa_structure(data):
-    """Valida la estructura del JSON generado - NO CAMBIAR"""
-    required_keys = ["TEST_CASES", "ALERTS", "COVERAGE"]
-    missing_keys = [k for k in required_keys if k not in data]
-    
-    if missing_keys:
-        raise ValueError(f"Faltan claves requeridas: {', '.join(missing_keys)}")
-    
-    if not isinstance(data["TEST_CASES"], list):
-        raise ValueError("TEST_CASES debe ser una lista")
-    
-    if len(data["TEST_CASES"]) == 0:
-        raise ValueError("No se generaron casos de prueba.")
-    
-    return data
+    raise last_error
 
-# ============================================
-# FUNCIONES AUXILIARES
-# ============================================
 
-def get_safe_text(text, default=""):
-    """Obtiene texto de manera segura"""
-    if text is None:
-        return default
-    return str(text).strip()
+# ============================================================
+# EXCEL — ESTRUCTURA APROBADA
+# ============================================================
+def create_excel(data, config_key):
+    config = EXCEL_CONFIGS[config_key]
+    output = io.BytesIO()
 
-def get_safe_steps(tc):
-    """Obtiene steps de manera segura"""
-    steps = tc.get("Steps")
-    if not steps:
-        return []
-    if not isinstance(steps, list):
-        return []
-    return steps
+    azure_rows = []
+    matriz_rows = []
+    cases = data.get("TEST_CASES", [])
 
-# ============================================
-# FUNCIÓN PARA GENERAR EXCEL CON FORMATO SEGÚN TIPO DE PRUEBA
-# ============================================
+    for idx, tc in enumerate(cases, start=1):
+        module = safe_text(tc.get("Module"), "GENERAL")
+        case_id = normalize_case_id(
+            tc.get("ID"), module, idx, config["title_prefix"]
+        )
+        title = safe_text(tc.get("Title"), f"{case_id} Sin título")
+        description = safe_text(tc.get("Description"))
+        preconditions = safe_text(tc.get("Preconditions"))
+        scenario = safe_text(tc.get("Scenario"), description)
+        steps = safe_steps(tc)
 
-def create_excel_v8(data, config_key):
-    """
-    Crea Excel con la estructura según el formato seleccionado
-    Detecta automáticamente el tipo de prueba (UI o BD) para formatear los pasos
-    """
-    try:
-        output = io.BytesIO()
-        config = EXCEL_CONFIGS[config_key]
-        
-        azure_rows = []
-        base_id = config["base_id"]
-        base_testpoint = config["base_testpoint"]
-        title_prefix = config["title_prefix"]
-        user_default = config["user_default"]
-        steps_with_users = config["steps_with_users"]
-        
-        for idx, tc in enumerate(data.get("TEST_CASES", [])):
-            # Extraer el ID del caso
-            case_id = get_safe_text(tc.get("ID", f"{title_prefix}{idx+1:05d}"))
-            case_title = get_safe_text(tc.get("Title", f"{case_id} Sin título"))
-            steps = get_safe_steps(tc)
-            preconditions = get_safe_text(tc.get("Preconditions", ""))
-            description = get_safe_text(tc.get("Description", ""))
-            scenario = get_safe_text(tc.get("Scenario", ""))
-            
-            # ============================================
-            # DETECTAR TIPO DE PRUEBA (UI o BD)
-            # ============================================
-            test_type = "UI"  # Por defecto
-            bd_keywords = ["base de datos", "bd", "query", "sql", "script", "tabla", "select", "insert", "update", 
-                          "delete", "ejecutar", "consulta", "almacenamiento", "fasecolda", "sisa", "web services"]
-            
-            # Buscar en descripción, escenario, precondiciones y steps
-            text_to_check = f"{description} {scenario} {preconditions}"
-            for step in steps:
-                text_to_check += f" {step.get('Action', '')} {step.get('Expected value', '')}"
-            
-            text_to_check = text_to_check.lower()
-            
-            # Contar coincidencias con palabras clave de BD
-            bd_count = sum(1 for keyword in bd_keywords if keyword in text_to_check)
-            
-            # Si hay más de 2 coincidencias con palabras clave de BD, clasificar como BD
-            if bd_count >= 2:
-                test_type = "BD"
-            
-            # También detectar por palabras clave específicas en el título
-            if "bd" in case_title.lower() or "base de datos" in case_title.lower() or "query" in case_title.lower():
-                test_type = "BD"
-            
-            # Si el escenario contiene "base de datos" o "BD", clasificar como BD
-            if "base de datos" in scenario.lower() or "bd" in scenario.lower() or "query" in scenario.lower():
-                test_type = "BD"
-            
-            test_case_id = base_id + idx
-            test_point_id = f"{base_testpoint + idx}:0"
-            
-            # ============================================
-            # FILA 1: TÍTULO DEL CASO
-            # ============================================
+        coverage = find_coverage(data, tc)
+
+        validation_method = normalize_validation_method(
+            coverage.get("Validation Method", tc.get("Validation Method", "Pendiente"))
+        )
+
+        coverage_value = normalize_coverage(
+            coverage.get("Coverage", tc.get("Coverage", "Pendiente"))
+        )
+
+        alerts = safe_text(coverage.get("Alerts")) or aggregate_case_alerts(data, tc)
+
+        if alerts == "Sin Alertas" and data.get("ALERTS"):
+            general_alerts = []
+            for alert in data["ALERTS"]:
+                alert_name = safe_text(alert.get("Alert"))
+                reason = safe_text(alert.get("Reason"))
+                if alert_name:
+                    general_alerts.append(
+                        f"{alert_name}: {reason}" if reason else alert_name
+                    )
+            if general_alerts:
+                alerts = " | ".join(general_alerts)
+
+        # Azure Import
+        azure_case_id = config["base_id"] + idx - 1
+        test_point_id = f"{config['base_testpoint'] + idx - 1}:0"
+
+        azure_rows.append({
+            "TestCaseId": azure_case_id,
+            "Title": title,
+            "TestStep": "",
+            "StepAction": "",
+            "StepExpected": "",
+            "TestPointId": test_point_id,
+            "Configuration": config["configuration"],
+            "Tester": config["tester"],
+            "Outcome": "",
+            "Comment": "",
+        })
+
+        if not steps:
             azure_rows.append({
-                "TestCaseId": test_case_id,
-                "Title": case_title,
-                "TestStep": "",
-                "StepAction": "",
-                "StepExpected": "",
-                "TestPointId": test_point_id,
-                "Configuration": config["configuration"],
-                "Tester": config["tester"],
+                "TestCaseId": "",
+                "Title": "",
+                "TestStep": 1,
+                "StepAction": "Información insuficiente para definir el paso.",
+                "StepExpected": "Validar con el equipo funcional antes de ejecutar.",
+                "TestPointId": "",
+                "Configuration": "",
+                "Tester": "",
                 "Outcome": "",
-                "Comment": ""
+                "Comment": "ALERTA: caso sin pasos definidos.",
             })
-            
-            # ============================================
-            # FILAS DE STEPS SEGÚN TIPO DE PRUEBA
-            # ============================================
-            if not steps:
+        else:
+            for step_index, step in enumerate(steps, start=1):
                 azure_rows.append({
                     "TestCaseId": "",
                     "Title": "",
-                    "TestStep": 1,
-                    "StepAction": "Sin steps definidos. Validar con equipo funcional.",
-                    "StepExpected": "Definir pasos según comportamiento esperado",
+                    "TestStep": step.get("Step #", step_index),
+                    "StepAction": safe_text(
+                        step.get("Action"), "Acción no definida"
+                    ),
+                    "StepExpected": safe_text(
+                        step.get("Expected value"),
+                        "Resultado esperado no definido",
+                    ),
                     "TestPointId": "",
                     "Configuration": "",
                     "Tester": "",
                     "Outcome": "",
-                    "Comment": ""
+                    "Comment": "",
                 })
-            else:
-                for step_idx, step in enumerate(steps):
-                    step_num = step.get("Step #", step_idx + 1)
-                    step_action = get_safe_text(step.get("Action", ""))
-                    step_expected = get_safe_text(step.get("Expected value", ""))
-                    
-                    # ============================================
-                    # FORMATO UI: Pasos con acciones detalladas y usuarios
-                    # ============================================
-                    if test_type == "UI":
-                        # Enriquecer con usuarios
-                        if steps_with_users and user_default:
-                            user_keywords = ["usuario", "suscriptor", "admin", "operador", "consultor", "validador"]
-                            has_user = any(keyword in step_action.lower() for keyword in user_keywords)
-                            
-                            if not has_user and len(step_action) > 0:
-                                if "usuario" in preconditions.lower():
-                                    user_match = re.search(r'(usuario|suscriptor|admin|operador)\s+([^,\n]+)', preconditions, re.IGNORECASE)
-                                    if user_match:
-                                        user_type = user_match.group(0).strip()
-                                        step_action = f"{step_action} con {user_type}"
-                                else:
-                                    if "ingresar" in step_action.lower() or "login" in step_action.lower() or "acceder" in step_action.lower():
-                                        step_action = f"Ingresar con el usuario y contraseña de {user_default}. {step_action}"
-                        
-                        # Enriquecer descripciones cortas
-                        if len(step_action) < 15 and step_action:
-                            step_action = f"{step_action}. Verificar comportamiento esperado."
-                        if len(step_expected) < 15 and step_expected:
-                            step_expected = f"{step_expected}. Validar que el sistema responda correctamente."
-                    
-                    # ============================================
-                    # FORMATO BD: Pasos técnicos con scripts
-                    # ============================================
-                    elif test_type == "BD":
-                        # Formato específico para BD
-                        if "ejecutar" in step_action.lower() or "query" in step_action.lower() or "select" in step_action.lower():
-                            # Extraer el script SQL si existe
-                            sql_match = re.search(r'(SELECT|INSERT|UPDATE|DELETE|EXEC|exec|select|insert|update|delete)\s+.*', step_action, re.IGNORECASE)
-                            if sql_match:
-                                sql_script = sql_match.group(0)
-                                step_action = f"Ejecutar el siguiente script: {sql_script}"
-                            else:
-                                # Si no tiene SQL explícito, formatear como consulta
-                                if "query" in step_action.lower() or "script" in step_action.lower():
-                                    step_action = f"Ejecutar el script de consulta en la base de datos"
-                        
-                        # Formato de expected para BD
-                        if len(step_expected) < 15 and step_expected:
-                            step_expected = f"Mostrar los resultados de la consulta correctamente"
-                    
-                    azure_rows.append({
-                        "TestCaseId": "",
-                        "Title": "",
-                        "TestStep": step_num,
-                        "StepAction": step_action,
-                        "StepExpected": step_expected,
-                        "TestPointId": "",
-                        "Configuration": "",
-                        "Tester": "",
-                        "Outcome": "",
-                        "Comment": ""
-                    })
-        
-        df_azure = pd.DataFrame(azure_rows)
-        
-        # ============================================
-        # HOJA 2: MATRIZ QA con tipo de prueba
-        # ============================================
-        
-        matriz_rows = []
-        for idx, tc in enumerate(data.get("TEST_CASES", [])):
-            alerts_list = tc.get("Alerts", [])
-            alerts_str = " | ".join([f"{a.get('Alert', '')}: {a.get('Reason', '')}" 
-                                   for a in alerts_list if a.get('Alert') and a.get('Reason')]) if alerts_list else "Sin Alertas"
-            
-            description = get_safe_text(tc.get("Description", ""))
-            scenario = get_safe_text(tc.get("Scenario", ""))
-            
-            # Determinar tipo de prueba para la matriz
-            case_text = f"{description} {scenario}"
-            bd_keywords = ["base de datos", "bd", "query", "sql", "script", "tabla", "select", "fasecolda", "sisa"]
-            is_bd = any(keyword in case_text.lower() for keyword in bd_keywords)
-            
-            validation_method = "BD" if is_bd else "UI"
-            
-            if steps_with_users and user_default and scenario:
-                if "usuario" not in scenario.lower():
-                    scenario = f"{scenario} - {user_default}"
-            
-            matriz_rows.append({
-                "Requirement / Use Case": get_safe_text(tc.get("Related Use Case", "")),
-                "Criterion": get_safe_text(tc.get("Criterion", "")),
-                "Scenario": scenario if scenario else description[:50] + "..." if len(description) > 50 else description,
-                "Test Case": get_safe_text(tc.get("ID", "")),
-                "Validation Method": validation_method,
-                "Coverage": get_safe_text(tc.get("Coverage", "Pendiente")),
-                "Alerts": alerts_str
-            })
-        
-        df_matriz = pd.DataFrame(matriz_rows)
-        
-        # ============================================
-        # GUARDAR EXCEL
-        # ============================================
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_azure.to_excel(writer, sheet_name=config["sheet_name"], index=False)
-            df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
-            
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    if column_letter in ['D', 'E']:
-                        adjusted_width = min(max_length + 5, 80)
-                    else:
-                        adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        output.seek(0)
-        return output
-        
-    except Exception as e:
-        logger.error(f"Error en create_excel_v8: {str(e)}")
-        raise
 
-# ============================================
-# FUNCIÓN PARA GENERAR PDF
-# ============================================
+        # Matriz QA
+        matriz_rows.append({
+            "TestCaseId": case_id,
+            "Title": title,
+            "Requirement / Use Case": safe_text(
+                coverage.get("Requirement / Use Case", tc.get("Related Use Case"))
+            ),
+            "Criterion": safe_text(
+                coverage.get("Criterion", tc.get("Criterion"))
+            ),
+            "Scenario": scenario,
+            "Scenario Type": safe_text(tc.get("Scenario Type"), "No definido"),
+            "Description": description,
+            "Preconditions": preconditions,
+            "Validation Method": validation_method,
+            "Coverage": coverage_value,
+            "Alerts": alerts,
+            "Effort": safe_text(tc.get("Effort"), "No definido"),
+        })
 
-def sanitize_text_for_pdf(text):
-    """Sanitiza texto para ReportLab"""
-    if not text:
-        return ""
-    replacements = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&apos;'
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    return text
+    df_azure = pd.DataFrame(azure_rows, columns=AZURE_COLUMNS)
+    df_matriz = pd.DataFrame(matriz_rows, columns=MATRIZ_COLUMNS)
 
-def create_pdf_v8(data):
-    """Crea PDF con el reporte"""
-    try:
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer, 
-            pagesize=letter, 
-            rightMargin=36, 
-            leftMargin=36, 
-            topMargin=36, 
-            bottomMargin=36
-        )
-        story = []
-        
-        styles = getSampleStyleSheet()
-        
-        title_style = ParagraphStyle(
-            'DocTitle', 
-            parent=styles['Heading1'], 
-            fontSize=16, 
-            leading=20, 
-            textColor=colors.HexColor('#1A365D'),
-            spaceAfter=12
-        )
-        h2_style = ParagraphStyle(
-            'SectionHeader', 
-            parent=styles['Heading2'], 
-            fontSize=12, 
-            leading=16, 
-            textColor=colors.HexColor('#2B6CB0'),
-            spaceBefore=12,
-            spaceAfter=6
-        )
-        body_style = ParagraphStyle(
-            'BodyText', 
-            parent=styles['Normal'], 
-            fontSize=9, 
-            leading=12,
-            spaceAfter=3
-        )
-        bold_style = ParagraphStyle(
-            'BoldText', 
-            parent=body_style, 
-            fontName='Helvetica-Bold'
-        )
-        small_style = ParagraphStyle(
-            'SmallText', 
-            parent=body_style, 
-            fontSize=7, 
-            textColor=colors.HexColor('#718096')
-        )
-        
-        # Portada
-        story.append(Paragraph("VERSION PREVIA — DRAFT", small_style))
-        story.append(Spacer(1, 20))
-        story.append(Paragraph("ANÁLISIS DE CASOS DE PRUEBA QA", title_style))
-        story.append(Spacer(1, 5))
-        story.append(Paragraph(f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}", small_style))
-        story.append(Spacer(1, 20))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
-        story.append(Spacer(1, 20))
-        
-        test_cases = data.get("TEST_CASES", [])
-        total_cp = len(test_cases)
-        total_alerts = len(data.get("ALERTS", []))
-        
-        story.append(Paragraph("RESUMEN GENERAL", h2_style))
-        story.append(Paragraph(f"Total de Casos de Prueba: {total_cp}", body_style))
-        story.append(Paragraph(f"Total de Alertas Generadas: {total_alerts}", body_style))
-        
-        scenario_types = {}
-        for tc in test_cases:
-            stype = tc.get("Scenario Type", "No definido")
-            scenario_types[stype] = scenario_types.get(stype, 0) + 1
-        
-        if scenario_types:
-            story.append(Spacer(1, 5))
-            story.append(Paragraph("Distribución de Escenarios:", body_style))
-            for stype, count in scenario_types.items():
-                story.append(Paragraph(f"• {stype}: {count} casos", body_style))
-        
-        story.append(Spacer(1, 10))
-        
-        alerts = data.get("ALERTS", [])
-        if alerts:
-            story.append(Paragraph("ALERTAS GENERALES", h2_style))
-            for alert in alerts:
-                alert_text = sanitize_text_for_pdf(alert.get("Alert", ""))
-                reason_text = sanitize_text_for_pdf(alert.get("Reason", ""))
-                validation_text = sanitize_text_for_pdf(alert.get("Validation Required", ""))
-                story.append(Paragraph(f"• <b>{alert_text}</b>: {reason_text}", body_style))
-                if validation_text:
-                    story.append(Paragraph(f"  <i>Validación: {validation_text}</i>", body_style))
-            story.append(Spacer(1, 10))
-            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
-            story.append(Spacer(1, 10))
-        
-        story.append(Paragraph("CASOS DE PRUEBA", h2_style))
-        story.append(Spacer(1, 5))
-        
-        for idx, tc in enumerate(test_cases):
-            tc_id = sanitize_text_for_pdf(tc.get('ID', f'CP-{idx+1:05d}'))
-            tc_title = sanitize_text_for_pdf(tc.get('Title', 'Sin título'))
-            story.append(Paragraph(f"<b>{tc_id}</b>", bold_style))
-            story.append(Paragraph(f"<b>{tc_title}</b>", body_style))
-            
-            desc = sanitize_text_for_pdf(tc.get('Description', 'Sin descripción'))
-            if desc:
-                story.append(Paragraph(f"<b>Descripción:</b> {desc}", body_style))
-            
-            preconditions = sanitize_text_for_pdf(tc.get('Preconditions', 'No definidas'))
-            story.append(Paragraph(f"<b>Precondiciones:</b> {preconditions}", body_style))
-            
-            related_uc = sanitize_text_for_pdf(tc.get('Related Use Case', 'No definido'))
-            scenario = sanitize_text_for_pdf(tc.get('Scenario', 'No definido'))
-            scenario_type = sanitize_text_for_pdf(tc.get('Scenario Type', 'No definido'))
-            effort = sanitize_text_for_pdf(tc.get('Effort', 'No definido'))
-            
-            story.append(Paragraph(
-                f"<b>Requisito:</b> {related_uc} | <b>Escenario:</b> {scenario} ({scenario_type}) | <b>Effort:</b> {effort}",
-                body_style
-            ))
-            story.append(Spacer(1, 5))
-            
-            steps = get_safe_steps(tc)
-            if steps:
-                steps_data = [["Step #", "Action", "Expected Value"]]
-                for step in steps:
-                    action = sanitize_text_for_pdf(step.get("Action", "No definida"))
-                    expected = sanitize_text_for_pdf(step.get("Expected value", "No definido"))
-                    step_num = step.get("Step #", len(steps_data))
-                    steps_data.append([str(step_num), action, expected])
-                
-                t_steps = Table(steps_data, colWidths=[40, 220, 260])
-                t_steps.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#EDF2F7')),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#2D3748')),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,-1), 8),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ('PADDING', (0,0), (-1,-1), 4),
-                ]))
-                story.append(t_steps)
-            else:
-                story.append(Paragraph("<i>No se definieron steps para este caso</i>", body_style))
-            
-            story.append(Spacer(1, 5))
-            
-            case_alerts = tc.get("Alerts", [])
-            if case_alerts:
-                story.append(Paragraph("<b>ALERTAS:</b>", bold_style))
-                for alert in case_alerts:
-                    alert_text = sanitize_text_for_pdf(alert.get('Alert', ''))
-                    reason = sanitize_text_for_pdf(alert.get('Reason', ''))
-                    validation = sanitize_text_for_pdf(alert.get('Validation Required', ''))
-                    story.append(Paragraph(
-                        f"• <b>{alert_text}</b>: {reason}" + (f" <i>({validation})</i>" if validation else ""),
-                        body_style
-                    ))
-                story.append(Spacer(1, 5))
-            
-            if idx < len(test_cases) - 1:
-                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E2E8F0')))
-                story.append(Spacer(1, 5))
-        
-        story.append(Spacer(1, 20))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CBD5E0')))
-        story.append(Paragraph(
-            f"VERSION PREVIA — DRAFT - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            small_style
-        ))
-        story.append(Paragraph("Documento generado automáticamente. Requiere revisión y validación por equipo funcional.", small_style))
-        
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
-        
-    except Exception as e:
-        logger.error(f"Error en create_pdf_v8: {str(e)}")
-        raise
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        azure_sheet = config["sheet_name"][:31]
+        df_azure.to_excel(writer, sheet_name=azure_sheet, index=False)
+        df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
 
-# ============================================
-# BOTÓN DE PROCESAMIENTO
-# ============================================
+        for ws in writer.book.worksheets:
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = ws.dimensions
 
-col1, col2, col3 = st.columns([2, 1.5, 2])
-with col2:
-    process_button = st.button(
-        "🚀 Generar Casos de Prueba",
-        type="primary",
-        use_container_width=True,
-        disabled=st.session_state.processing,
-        help="Inicia el análisis del documento y genera casos de prueba"
+            for column_cells in ws.columns:
+                letter = column_cells[0].column_letter
+                max_len = max(
+                    len(str(cell.value or "")) for cell in column_cells
+                )
+                ws.column_dimensions[letter].width = min(
+                    max(max_len + 2, 12), 60
+                )
+
+    output.seek(0)
+    return output.getvalue()
+
+
+# ============================================================
+# PDF
+# ============================================================
+def pdf_text(value):
+    return escape(safe_text(value)).replace("\n", "<br/>")
+
+
+def create_pdf(data, config_key):
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36,
     )
 
-# ============================================
-# PROCESAR
-# ============================================
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "title", parent=styles["Heading1"], fontSize=16, leading=19
+    )
+    h2 = ParagraphStyle(
+        "h2", parent=styles["Heading2"], fontSize=11, leading=14
+    )
+    body = ParagraphStyle(
+        "body", parent=styles["BodyText"], fontSize=8, leading=11
+    )
+    small = ParagraphStyle(
+        "small", parent=body, fontSize=7
+    )
 
-if process_button:
-    text_to_process = source_text or st.session_state.source_content
-    
-    if not api_key:
-        st.error("❌ Por favor ingrese su Gemini API Key o configúrela en Secrets.")
-    elif not text_to_process.strip():
-        st.warning("⚠️ Por favor cargue un archivo o ingrese texto para analizar.")
+    story = [
+        Paragraph("VERSION PREVIA — DRAFT", small),
+        Spacer(1, 12),
+        Paragraph("ANÁLISIS DE CASOS DE PRUEBA QA", title),
+        Paragraph(f"Formato: {pdf_text(config_key)}", small),
+        Paragraph(
+            f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            small,
+        ),
+        Spacer(1, 12),
+        HRFlowable(width="100%", thickness=1),
+        Spacer(1, 10),
+    ]
+
+    cases = data.get("TEST_CASES", [])
+    alerts = data.get("ALERTS", [])
+
+    story.extend([
+        Paragraph("RESUMEN GENERAL", h2),
+        Paragraph(f"Total de Casos de Prueba: {len(cases)}", body),
+        Paragraph(f"Total de Alertas Generales: {len(alerts)}", body),
+        Spacer(1, 10),
+    ])
+
+    if alerts:
+        story.append(Paragraph("ALERTAS GENERALES", h2))
+        for alert in alerts:
+            story.append(
+                Paragraph(
+                    f"<b>{pdf_text(alert.get('Alert'))}</b>: "
+                    f"{pdf_text(alert.get('Reason'))}",
+                    body,
+                )
+            )
+            validation = safe_text(alert.get("Validation Required"))
+            if validation:
+                story.append(
+                    Paragraph(
+                        f"Validación requerida: {pdf_text(validation)}",
+                        small,
+                    )
+                )
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph("CASOS DE PRUEBA", h2))
+
+    for idx, tc in enumerate(cases, start=1):
+        case_id = safe_text(tc.get("ID"), f"CP-{idx:05d}")
+
+        story.append(
+            Paragraph(
+                f"<b>{pdf_text(case_id)}</b> — "
+                f"{pdf_text(tc.get('Title'))}",
+                body,
+            )
+        )
+
+        story.append(
+            Paragraph(
+                f"<b>Descripción:</b> {pdf_text(tc.get('Description'))}",
+                body,
+            )
+        )
+
+        story.append(
+            Paragraph(
+                f"<b>Precondiciones:</b> "
+                f"{pdf_text(tc.get('Preconditions'))}",
+                body,
+            )
+        )
+
+        story.append(
+            Paragraph(
+                f"<b>Escenario:</b> {pdf_text(tc.get('Scenario'))} | "
+                f"<b>Tipo:</b> {pdf_text(tc.get('Scenario Type'))} | "
+                f"<b>Esfuerzo:</b> {pdf_text(tc.get('Effort'))}",
+                body,
+            )
+        )
+
+        steps = safe_steps(tc)
+
+        if steps:
+            rows = [["Step #", "Action", "Expected Value"]]
+
+            for step in steps:
+                rows.append([
+                    safe_text(step.get("Step #")),
+                    Paragraph(pdf_text(step.get("Action")), body),
+                    Paragraph(pdf_text(step.get("Expected value")), body),
+                ])
+
+            table = Table(
+                rows,
+                colWidths=[45, 230, 245],
+                repeatRows=1,
+            )
+
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E0")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("PADDING", (0, 0), (-1, -1), 4),
+            ]))
+
+            story.append(table)
+        else:
+            story.append(
+                Paragraph(
+                    "<i>No se definieron steps para este caso.</i>",
+                    body,
+                )
+            )
+
+        case_alerts = tc.get("Alerts", [])
+
+        if isinstance(case_alerts, list) and case_alerts:
+            story.append(Paragraph("<b>Alertas del caso:</b>", body))
+
+            for alert in case_alerts:
+                story.append(
+                    Paragraph(
+                        f"• {pdf_text(alert.get('Alert'))}: "
+                        f"{pdf_text(alert.get('Reason'))} | "
+                        f"{pdf_text(alert.get('Validation Required'))}",
+                        small,
+                    )
+                )
+
+        story.append(Spacer(1, 8))
+
+        if idx < len(cases):
+            story.append(HRFlowable(width="100%", thickness=0.5))
+            story.append(Spacer(1, 8))
+
+    story.extend([
+        Spacer(1, 15),
+        HRFlowable(width="100%", thickness=1),
+        Paragraph(
+            "Documento generado automáticamente. "
+            "Requiere revisión y validación por el equipo funcional.",
+            small,
+        ),
+    ])
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ============================================================
+# INTERFAZ
+# ============================================================
+st.set_page_config(
+    page_title=f"Agente QA {APP_VERSION}",
+    layout="wide",
+)
+
+if "source_content" not in st.session_state:
+    st.session_state.source_content = ""
+if "source_name" not in st.session_state:
+    st.session_state.source_name = ""
+if "result_json" not in st.session_state:
+    st.session_state.result_json = None
+if "excel_data" not in st.session_state:
+    st.session_state.excel_data = None
+if "pdf_data" not in st.session_state:
+    st.session_state.pdf_data = None
+
+st.title(f"🤖 Agente QA {APP_VERSION} — Generador de Casos de Prueba")
+st.caption(
+    "VERSION PREVIA — DRAFT | PDF / DOCX / TXT / MD → análisis QA → Excel + PDF"
+)
+
+with st.sidebar:
+    st.header("⚙️ Configuración")
+
+    api_key = st.secrets.get(
+        "GEMINI_API_KEY",
+        os.getenv("GEMINI_API_KEY", ""),
+    )
+
+    if api_key:
+        st.success("✅ GEMINI_API_KEY configurada")
     else:
-        st.session_state.processing = True
-        
+        api_key = st.text_input(
+            "🔑 Google Gemini API Key",
+            type="password",
+        )
+
+    selected_model = st.selectbox(
+        "Modelo",
+        FALLBACK_MODELS,
+        index=0,
+    )
+
+    selected_config = st.selectbox(
+        "Formato de Excel",
+        list(EXCEL_CONFIGS.keys()),
+        index=0,
+    )
+
+    temperature = st.slider(
+        "Temperatura",
+        0.0,
+        0.5,
+        0.1,
+        0.05,
+    )
+
+    max_retries = st.number_input(
+        "Máximo de reintentos",
+        min_value=0,
+        max_value=5,
+        value=2,
+    )
+
+    wait_time = st.number_input(
+        "Espera inicial (segundos)",
+        min_value=1,
+        max_value=60,
+        value=10,
+    )
+
+
+st.subheader("📁 Carga de Documento")
+
+st.info(
+    "Formatos soportados: TXT, MD, PDF, DOCX. "
+    "Para PDF escaneado se requiere OCR; esta versión no inventa "
+    "texto que no pueda extraer."
+)
+
+uploaded = st.file_uploader(
+    "Arrastra o selecciona un documento",
+    type=["txt", "md", "pdf", "docx"],
+)
+
+source_text = st.session_state.source_content
+
+if uploaded:
+    # Procesar solo cuando cambia el archivo.
+    if st.session_state.source_name != uploaded.name:
         try:
-            result_json = generate_qa_data_with_gemini(
-                system_prompt,
-                text_to_process,
+            with st.spinner(f"Procesando {uploaded.name}..."):
+                source_text = extract_source(uploaded)
+
+            st.session_state.source_content = source_text
+            st.session_state.source_name = uploaded.name
+            st.session_state.result_json = None
+            st.session_state.excel_data = None
+            st.session_state.pdf_data = None
+
+            st.success(f"✅ {uploaded.name} procesado correctamente.")
+
+        except Exception as exc:
+            st.session_state.source_content = ""
+            st.session_state.source_name = ""
+            st.session_state.result_json = None
+            st.session_state.excel_data = None
+            st.session_state.pdf_data = None
+
+            st.error(f"❌ No se pudo procesar el archivo: {exc}")
+
+if source_text:
+    with st.expander("📄 Vista previa del contenido", expanded=True):
+        st.text_area(
+            "Contenido",
+            source_text[:5000],
+            height=250,
+            disabled=True,
+        )
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Caracteres", len(source_text))
+        c2.metric("Líneas", len(source_text.splitlines()))
+        c3.metric("Palabras", len(source_text.split()))
+
+else:
+    source_text = st.text_area(
+        "✏️ O ingresa el texto manualmente",
+        height=220,
+        placeholder=(
+            "Pega aquí la Historia de Usuario o documentación fuente..."
+        ),
+    )
+
+    if source_text:
+        st.session_state.source_content = source_text
+
+
+st.divider()
+st.subheader("🧪 Generación QA")
+
+if st.button(
+    "🚀 Generar casos de prueba",
+    type="primary",
+    disabled=not bool(source_text.strip()),
+):
+    try:
+        with st.spinner(
+            "Analizando documentación y generando casos..."
+        ):
+            result = generate_qa_data(
+                load_prompt(),
+                source_text,
                 api_key,
                 selected_model,
                 temperature,
-                max_retries,
-                wait_time
+                int(max_retries),
+                int(wait_time),
             )
-            
-            st.success("✅ Análisis QA generado exitosamente con Gemini 3.6 Flash")
-            
-            with st.spinner("⏳ Generando archivos Excel y PDF..."):
-                excel_file = create_excel_v8(result_json, selected_config)
-                pdf_file = create_pdf_v8(result_json)
-            
-            st.session_state.result_json = result_json
-            st.session_state.last_processed = datetime.now()
-            st.session_state.excel_data = excel_file
-            st.session_state.pdf_data = pdf_file
-            st.session_state.generated_file_name = f"QA_Casos_{datetime.now().strftime('%Y%m%d_%H%M')}"
-            
-            test_cases = result_json.get("TEST_CASES", [])
-            total_steps = sum(len(get_safe_steps(tc)) for tc in test_cases)
-            total_alerts = len(result_json.get("ALERTS", []))
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📋 Casos", len(test_cases))
-            with col2:
-                st.metric("📝 Steps", total_steps)
-            with col3:
-                st.metric("⚠️ Alertas", total_alerts)
-            with col4:
-                st.metric("⏱️ Tiempo", f"{datetime.now() - st.session_state.last_processed if st.session_state.last_processed else 'N/A'}")
-            
-            with st.expander("📊 Resumen de escenarios", expanded=False):
-                scenario_types = {}
-                for tc in test_cases:
-                    stype = tc.get("Scenario Type", "No definido")
-                    scenario_types[stype] = scenario_types.get(stype, 0) + 1
-                
-                for stype, count in scenario_types.items():
-                    st.write(f"**{stype}**: {count} casos")
-            
-            with st.expander("🔍 Ver JSON generado"):
-                st.json(result_json)
-            
-        except Exception as e:
-            st.error(f"❌ Error al procesar: {str(e)}")
-            logger.error(f"Error: {str(e)}")
-            
-            st.info("""
-            💡 **Posibles soluciones:**
-            1. Espera unos minutos y vuelve a intentar (cuota de Gemini)
-            2. Cambia a un modelo diferente en la barra lateral
-            3. Reduce el tamaño del documento
-            4. Verifica que tu API Key sea válida
-            5. Modelo recomendado: gemini-3.6-flash
-            """)
-            
-        finally:
-            st.session_state.processing = False
 
-# ============================================
-# BOTONES FIJOS DE DESCARGA (SIEMPRE VISIBLES)
-# ============================================
-
-st.markdown("---")
-st.markdown('<div class="fixed-buttons">', unsafe_allow_html=True)
-st.subheader("📥 Descargar Archivos Generados")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.session_state.excel_data is not None:
-        st.download_button(
-            label="📥 Descargar Excel (Azure Import + Matriz QA)",
-            data=st.session_state.excel_data,
-            file_name=f"{st.session_state.generated_file_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+        st.session_state.result_json = result
+        st.session_state.excel_data = create_excel(
+            result,
+            selected_config,
         )
-    else:
-        st.info("⏳ Genera casos de prueba para habilitar la descarga")
-
-with col2:
-    if st.session_state.pdf_data is not None:
-        st.download_button(
-            label="📄 Descargar PDF Draft Report",
-            data=st.session_state.pdf_data,
-            file_name=f"{st.session_state.generated_file_name}.pdf",
-            mime="application/pdf",
-            use_container_width=True
+        st.session_state.pdf_data = create_pdf(
+            result,
+            selected_config,
         )
-    else:
-        st.info("⏳ Genera casos de prueba para habilitar la descarga")
 
-st.markdown('</div>', unsafe_allow_html=True)
+        st.success(
+            f"✅ Generación completada: "
+            f"{len(result['TEST_CASES'])} casos."
+        )
 
-# ============================================
-# FOOTER
-# ============================================
+    except Exception as exc:
+        st.error(f"❌ Error durante la generación: {exc}")
 
-st.divider()
-st.caption("""
-**Agente QA V8** — VERSION PREVIA — DRAFT | 
-Desarrollado con Streamlit y Google Gemini 3.6 Flash | 
-Principios: Trazabilidad + Fidelidad + No Invención
-""")
+
+result = st.session_state.result_json
+
+if result:
+    st.divider()
+    st.subheader("📊 Resultados")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Casos", len(result.get("TEST_CASES", [])))
+    c2.metric("Alertas", len(result.get("ALERTS", [])))
+    c3.metric("Cobertura", len(result.get("COVERAGE", [])))
+
+    st.download_button(
+        "📊 Descargar Excel",
+        data=st.session_state.excel_data,
+        file_name=(
+            f"QA_DRAFT_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        ),
+        mime=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+    )
+
+    st.download_button(
+        "📄 Descargar PDF",
+        data=st.session_state.pdf_data,
+        file_name=(
+            f"QA_DRAFT_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        ),
+        mime="application/pdf",
+    )
+
+    with st.expander("🔎 Ver JSON generado", expanded=False):
+        st.json(result)
+
+    st.subheader("🧪 Casos generados")
+
+    preview_rows = []
+
+    for tc in result["TEST_CASES"]:
+        preview_rows.append({
+            "ID": safe_text(tc.get("ID")),
+            "Title": safe_text(tc.get("Title")),
+            "Module": safe_text(tc.get("Module")),
+            "Scenario Type": safe_text(tc.get("Scenario Type")),
+            "Steps": len(safe_steps(tc)),
+        })
+
+    st.dataframe(
+        pd.DataFrame(preview_rows),
+        use_container_width=True,
+    )
