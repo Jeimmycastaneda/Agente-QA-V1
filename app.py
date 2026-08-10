@@ -21,7 +21,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V11"
+APP_VERSION = "V12"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -211,6 +211,43 @@ def module_token(module, title="", scenario=""):
     if len(words) == 1:
         return words[0][:12]
     return "".join(w[0] for w in words)[:8]
+
+
+def build_case_title(tc, case_id):
+    """
+    V12: garantiza que Title sea un título funcional y no el CP ID.
+    Prioridad:
+      1) Title generado por el modelo si no es solo el ID.
+      2) Scenario
+      3) Description
+      4) Related Use Case
+      5) fallback controlado.
+    """
+    raw_title = safe_text(tc.get("Title"))
+    normalized_title = re.sub(r"\s+", " ", raw_title).strip()
+
+    # Un título igual al ID no es un título funcional.
+    if (
+        not normalized_title
+        or normalized_title.upper() == case_id.upper()
+        or re.fullmatch(r"CP-[A-Z0-9_-]+-\d{5}", normalized_title.upper())
+    ):
+        candidates = [
+            safe_text(tc.get("Scenario")),
+            safe_text(tc.get("Description")),
+            safe_text(tc.get("Related Use Case")),
+        ]
+
+        for candidate in candidates:
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+            if candidate and candidate.upper() != case_id.upper():
+                normalized_title = candidate
+                break
+
+    if not normalized_title:
+        normalized_title = f"Caso de prueba {case_id}"
+
+    return normalized_title
 
 
 def normalize_case_id(raw_id, module, index, prefix="CP-AC-"):
@@ -564,7 +601,7 @@ def create_excel(data, config_key):
         case_id = normalize_case_id(
             tc.get("ID"), module, idx, config["title_prefix"]
         )
-        title = safe_text(tc.get("Title"), f"{case_id} Sin título")
+        title = build_case_title(tc, case_id)
         description = safe_text(tc.get("Description"))
         preconditions = safe_text(tc.get("Preconditions"))
         scenario = safe_text(tc.get("Scenario"), description)
@@ -771,10 +808,11 @@ def create_pdf(data, config_key):
     for idx, tc in enumerate(cases, start=1):
         case_id = safe_text(tc.get("ID"), f"CP-{idx:05d}")
 
+        pdf_case_title = build_case_title(tc, case_id)
         story.append(
             Paragraph(
                 f"<b>{pdf_text(case_id)}</b> — "
-                f"{pdf_text(tc.get('Title'))}",
+                f"{pdf_text(pdf_case_title)}",
                 body,
             )
         )
@@ -1090,7 +1128,15 @@ if result:
     for tc in result["TEST_CASES"]:
         preview_rows.append({
             "ID": safe_text(tc.get("ID")),
-            "Title": safe_text(tc.get("Title")),
+            "Title": build_case_title(
+                tc,
+                normalize_case_id(
+                    tc.get("ID"),
+                    safe_text(tc.get("Module"), "GENERAL"),
+                    len(preview_rows) + 1,
+                    EXCEL_CONFIGS[selected_config]["title_prefix"],
+                ),
+            ),
             "Module": safe_text(tc.get("Module")),
             "Scenario Type": safe_text(tc.get("Scenario Type")),
             "Steps": len(safe_steps(tc)),
