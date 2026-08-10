@@ -23,7 +23,12 @@ except ImportError:
 
 APP_VERSION = "V9"
 MODEL = "gemini-3.6-flash"
-FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+FALLBACK_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+]
 
 # ============================================================
 # COLUMNAS APROBADAS — NO AGREGAR NI CAMBIAR TÍTULOS
@@ -373,6 +378,43 @@ def validate_qa_structure(data):
     return data
 
 
+def _is_gemini_3x(model_name):
+    return safe_text(model_name).lower().startswith(("gemini-3.", "gemini-3"))
+
+
+def _extract_error_detail(exc):
+    raw = str(exc)
+    # Keep the useful API message but avoid dumping huge exception payloads.
+    return raw[:1800]
+
+
+def _generate_once(client, model_name, full_prompt):
+    """
+    V10:
+    - Gemini 3.x: no temperature/top_p/top_k.
+    - Uses structured JSON output.
+    - Limits output to 32K tokens for stability.
+    """
+    config = {
+        "response_format": {
+            "text": {
+                "mime_type": "application/json",
+                "schema": SCHEMA,
+            }
+        },
+        "max_output_tokens": 32768,
+    }
+
+    # Gemini 3.x no longer accepts sampling parameters.
+    # For 2.5 we intentionally keep the same deterministic behavior
+    # by not sending temperature either.
+    return client.models.generate_content(
+        model=model_name,
+        contents=full_prompt,
+        config=config,
+    )
+
+
 def generate_qa_data(
     prompt_text,
     source_content,
@@ -391,61 +433,122 @@ def generate_qa_data(
     if not source_content.strip():
         raise ValueError("Fuente de información vacía.")
 
-    max_source_chars = 30000
+    max_source_chars = 28000
     if len(source_content) > max_source_chars:
-        source_content = source_content[:max_source_chars] + "\n...[CONTENIDO TRUNCADO]"
+        source_content = source_content[:max_source_chars] + (
+            "\n...[CONTENIDO TRUNCADO POR LÍMITE DE SEGURIDAD]"
+        )
 
     full_prompt = (
         prompt_text
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
+        + "\n\n==================== REGLA DE SALIDA ====================\n"
+        "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
+        "No agregues explicaciones fuera del JSON."
     )
 
     client = genai.Client(api_key=api_key)
-    last_error = None
 
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SCHEMA,
-                    temperature=temperature,
-                    max_output_tokens=65536,
-                ),
-            )
+    # Prefer selected model, then use stable/available fallbacks.
+    candidates = []
+    for candidate in [model_name] + FALLBACK_MODELS:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
 
-            text = (response.text or "").strip()
-            if not text:
-                raise ValueError("Gemini devolvió una respuesta vacía.")
+    errors = []
 
+    for candidate in candidates:
+        for attempt in range(max_retries + 1):
             try:
-                data = json.loads(text)
-            except json.JSONDecodeError:
-                match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-                if not match:
-                    raise
-                data = json.loads(match.group(1))
+                response = _generate_once(
+                    client,
+                    candidate,
+                    full_prompt,
+                )
 
-            return validate_qa_structure(data)
+                response_text = (response.text or "").strip()
 
-        except Exception as exc:
-            last_error = exc
-            error_text = str(exc).lower()
-            is_quota = (
-                "429" in str(exc)
-                or "quota" in error_text
-                or "rate limit" in error_text
-            )
+                if not response_text:
+                    raise RuntimeError(
+                        f"{candidate}: Gemini devolvió una respuesta vacía."
+                    )
 
-            if not is_quota or attempt >= max_retries:
-                raise
+                try:
+                    data = json.loads(response_text)
+                except json.JSONDecodeError:
+                    match = re.search(
+                        r"```(?:json)?\s*([\s\S]*?)\s*```",
+                        response_text,
+                    )
+                    if not match:
+                        raise RuntimeError(
+                            f"{candidate}: la respuesta no es JSON válido. "
+                            f"Respuesta: {response_text[:1200]}"
+                        )
+                    data = json.loads(match.group(1))
 
-            time.sleep(initial_wait * (attempt + 1))
+                validated = validate_qa_structure(data)
 
-    raise last_error
+                st.session_state.quota_exceeded = False
+                st.session_state.retry_count = 0
+
+                return validated
+
+            except Exception as exc:
+                detail = _extract_error_detail(exc)
+                errors.append(f"{candidate} / intento {attempt + 1}: {detail}")
+
+                error_text = detail.lower()
+
+                is_quota = (
+                    "429" in detail
+                    or "quota" in error_text
+                    or "rate limit" in error_text
+                    or "resource exhausted" in error_text
+                )
+
+                is_retryable_internal = (
+                    "500" in detail
+                    or "internal" in error_text
+                    or "503" in detail
+                    or "unavailable" in error_text
+                    or "deadline" in error_text
+                    or "timeout" in error_text
+                )
+
+                if is_quota:
+                    st.session_state.quota_exceeded = True
+                    st.session_state.retry_count = attempt + 1
+
+                # A 400 caused by an unsupported request/schema should not
+                # be retried against the same model; move to next candidate.
+                is_bad_request = (
+                    "400" in detail
+                    or "invalid argument" in error_text
+                    or "invalid_argument" in error_text
+                    or "unsupported" in error_text
+                )
+
+                if (
+                    attempt < max_retries
+                    and (is_quota or is_retryable_internal)
+                ):
+                    time.sleep(initial_wait * (attempt + 1))
+                    continue
+
+                if is_bad_request or is_retryable_internal or is_quota:
+                    break
+
+                # Validation/JSON errors are meaningful and should be shown,
+                # but we still allow another model to try.
+                break
+
+    joined = "\n\n".join(errors[-8:])
+    raise RuntimeError(
+        "Gemini no pudo completar la generación con los modelos probados.\n\n"
+        "Detalle técnico:\n" + joined
+    )
 
 
 # ============================================================
@@ -826,14 +929,6 @@ with st.sidebar:
         index=0,
     )
 
-    temperature = st.slider(
-        "Temperatura",
-        0.0,
-        0.5,
-        0.1,
-        0.05,
-    )
-
     max_retries = st.number_input(
         "Máximo de reintentos",
         min_value=0,
@@ -932,7 +1027,7 @@ if st.button(
                 source_text,
                 api_key,
                 selected_model,
-                temperature,
+                0.0,
                 int(max_retries),
                 int(wait_time),
             )
