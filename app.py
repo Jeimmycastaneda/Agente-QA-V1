@@ -21,7 +21,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V9"
+APP_VERSION = "V11"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -395,19 +395,16 @@ def _generate_once(client, model_name, full_prompt):
     - Uses structured JSON output.
     - Limits output to 32K tokens for stability.
     """
-    config = {
-        "response_format": {
-            "text": {
-                "mime_type": "application/json",
-                "schema": SCHEMA,
-            }
-        },
-        "max_output_tokens": 32768,
-    }
+    # google-genai actual Python SDK format:
+    # response_mime_type + response_schema.
+    # Do NOT use response_format here; that shape is rejected by
+    # GenerateContentConfig in the installed SDK.
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=SCHEMA,
+        max_output_tokens=32768,
+    )
 
-    # Gemini 3.x no longer accepts sampling parameters.
-    # For 2.5 we intentionally keep the same deterministic behavior
-    # by not sending temperature either.
     return client.models.generate_content(
         model=model_name,
         contents=full_prompt,
