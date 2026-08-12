@@ -310,7 +310,7 @@ SCHEMA = {
                         },
                     },
                 },
-                "required": ["ID", "Title", "Description", "Expected Result", "Preconditions", "Related Use Case", "Steps"],
+                "required": ["ID", "Title", "Description", "Preconditions", "Steps"],
             },
         },
         "ALERTS": {
@@ -667,72 +667,117 @@ def _generate_once(client, model_name, full_prompt):
 # ADDENDUM DE CALIDAD — DETALLE FUNCIONAL DEL CP
 # ============================================================
 DETAILED_QA_ADDENDUM = """
-REGLAS OBLIGATORIAS — CASOS DE PRUEBA SUPER DETALLADOS BASADOS EN EL CU
+REGLAS OBLIGATORIAS DE NIVEL DE DETALLE PARA LOS CASOS DE PRUEBA
 
-1. COBERTURA OBLIGATORIA
-- Identifica TODOS los Casos de Uso (CU) presentes en la documentación.
-- Genera como mínimo 1 CP por cada CU identificado. ESTA REGLA ES OBLIGATORIA.
-- Cada CP debe relacionarse con EXACTAMENTE un CU mediante Related Use Case.
-- Un CU puede tener varios CP solo si existen escenarios funcionalmente distintos sustentados por la fuente.
-- Nunca generes CP adicionales solo para separar pasos.
+El Caso de Prueba debe reflejar con alto nivel de fidelidad el Caso de Uso (CU)
+relacionado. NO generes CP básicos, genéricos ni resumidos.
 
-2. EL CU ES LA FUENTE PRINCIPAL
-Para cada CP analiza el contenido COMPLETO del CU relacionado, no solo su título.
-Conserva, cuando exista en la fuente: ID, nombre, objetivo, contexto, actor/usuario/perfil,
-producto, módulo, pantalla/opción, precondiciones, datos/campos, reglas de negocio,
-restricciones, límites, estados, escenarios alternos, validaciones, mensajes y resultados.
+1. TRAZABILIDAD CU -> CP
+- Identifica el CU exacto que sustenta cada CP y usa su contenido completo como
+  fuente principal del caso.
+- Related Use Case debe indicar el ID y, cuando esté disponible, el nombre del CU.
+- Cada CP debe corresponder a EXACTAMENTE un CU.
+- Debe existir como mínimo un CP por cada CU identificado.
+- Si un CU requiere varios escenarios funcionales realmente distintos, puede tener
+  varios CP; no crees CP adicionales solo para separar pasos.
 
-SI ES NECESARIO PARA NO PERDER INFORMACIÓN, INCORPORA EL CU COMPLETO O CASI COMPLETO
-EN LA DESCRIPTION DEL CP. Es preferible una descripción extensa y fiel al CU a una
-frase corta que pierda información funcional.
+2. DESCRIPCIÓN SUPER DETALLADA
+La Description del CP debe explicar el escenario funcional completo. Incluye,
+cuando exista en la fuente:
+- objetivo y contexto del CU;
+- usuario, perfil o rol involucrado;
+- módulo, opción, pantalla o funcionalidad;
+- condiciones iniciales y precondiciones;
+- datos/campos que deben diligenciarse o consultarse;
+- reglas de negocio y condiciones;
+- estados iniciales/finales;
+- restricciones, límites y validaciones;
+- comportamiento esperado de cada parte relevante del flujo;
+- resultado final que debe obtener el usuario/sistema.
 
-3. DESCRIPTION — NO BÁSICA
-La Description debe explicar el escenario específico con los detalles reales de la fuente.
-Debe permitir que QA entienda qué se valida sin reconstruir el CU desde cero.
-No escribas frases genéricas como “Validar que el sistema permita realizar la cotización”
-si el CU contiene más información.
+Si para que el CP sea autónomo y ejecutable es necesario incorporar el contenido
+completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
 
-4. EXPECTED RESULT
-Expected Result debe reflejar el resultado funcional concreto del CU: estados, reglas,
-mensajes, datos y comportamiento final cuando estén definidos.
+3. PASOS COMPLETOS Y EJECUTABLES
+- Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
+- Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
+  necesario para reproducir el escenario.
+- Cada paso debe ser concreto y verificable: acción + resultado esperado.
+- No agrupes en una sola frase varias acciones importantes si eso hace perder
+  trazabilidad o dificulta la ejecución.
+- No conviertas cada paso en un CP diferente.
+- Un CP puede y debe tener múltiples Steps cuando el CU lo requiera.
 
-5. PRECONDITIONS
-Conserva todas las precondiciones definidas en el CU. No las sustituyas por frases genéricas.
+4. FIDELIDAD Y NO INVENCIÓN
+- Usa exclusivamente la documentación proporcionada como fuente de verdad.
+- No inventes usuarios, rutas, URLs, botones, mensajes, campos, valores, reglas,
+  permisos, datos o resultados que no estén sustentados.
+- Cuando la fuente no defina un dato necesario, conserva la incertidumbre y genera
+  ALERTA/Validation Required en lugar de inventarlo.
+- Sí puedes reorganizar y redactar para mejorar claridad, pero NO debes perder
+  detalles funcionales del CU.
 
-6. RELATED USE CASE
-Es obligatorio e identifica un único CU. Incluye ID y nombre cuando estén disponibles.
+5. CALIDAD MÍNIMA DEL CP
+Un CP se considera insuficiente si su Description, Preconditions, Expected Result
+ o Steps son tan genéricos que no permiten reconocer qué parte específica del CU
+ se está validando.
 
-7. STEPS COMPLETOS
-Los Steps deben representar TODO el flujo necesario para ejecutar y verificar el escenario.
-- Cada acción funcional relevante debe aparecer cuando sea necesaria.
-- Cada Step debe tener Action y Expected value concretos y verificables.
-- Mantén el orden del CU.
-- No resumas múltiples acciones importantes en un único paso si se pierde trazabilidad.
-- Un CP puede tener tantos Steps como requiera el CU.
-- NUNCA conviertas cada Step en un CP independiente.
+Ejemplo de calidad insuficiente:
+"Validar que el sistema permita realizar la cotización."
 
-8. FIDELIDAD / NO INVENCIÓN
-Usa la documentación proporcionada como única fuente de verdad. No inventes rutas,
-usuarios, botones, campos, datos, permisos, mensajes, reglas o resultados. Si falta un
-dato necesario, genera ALERT/Validation Required en lugar de inventarlo.
+Ejemplo de intención correcta:
+"Validar el flujo definido en el CU para el perfil indicado, incluyendo el ingreso
+al módulo, selección de la opción correspondiente, diligenciamiento/consulta de
+los datos definidos, aplicación de las reglas y condiciones establecidas, ejecución
+ de la operación y verificación del resultado final especificado por el CU."
 
-9. VALIDACIÓN ANTES DE DEVOLVER JSON
-Para cada CP comprueba: CU válido, Description detallada, Expected Result específico,
-Preconditions completas, Steps completos y ejecutables, y cobertura del CU.
-Si el CP resulta genérico, amplíalo usando el contenido del CU antes de devolverlo.
+El ejemplo anterior solo define el NIVEL DE DETALLE; los datos concretos siempre
+deben provenir de la documentación fuente.
 
-REGLAS OBLIGATORIAS — EXCEL AZURE IMPORT
-- Mantener exactamente este orden: ID, Work Item Type, Title, Test Step, Step Action,
-  Step Expected, Area Path, IDPadre, Tipo Origen Proyecto, Tiempo Real, Assigned To, State.
+6. ESTIMADOS CONTROLADOS DE RUTAS Y OPCIONES DE MENÚ
+Cuando el CU no indique de forma explícita la ruta de navegación, menú,
+pantalla u opción exacta, se permite complementar el CP con un estimado
+CONTROLADO si existe evidencia suficiente en el CU/documentación para
+inferir razonablemente la navegación.
+
+REGLAS PARA LOS ESTIMADOS:
+- Los estimados deben aparecer tanto en la DESCRIPTION como en los STEPS
+  cuando ayuden a hacer el caso ejecutable.
+- En DESCRIPTION usar la etiqueta "Ruta estimada:" o "Navegación sugerida:".
+- En STEPS usar la etiqueta "(Ruta estimada)" o "(Navegación sugerida)".
+- El estimado debe construirse únicamente a partir de módulos, funcionalidades,
+  pantallas u opciones que sí aparezcan en la documentación.
+- Nunca presentar una ruta estimada como si fuera una ruta confirmada.
+- Toda ruta estimada debe generar una alerta/Validation Required para validar
+  la navegación exacta con el equipo funcional.
+- NO inventar nombres específicos de botones, URLs, IDs, pantallas o menús si
+  no tienen sustento en la documentación.
+- Si no existe evidencia suficiente para estimar la ruta, indicar en el Step:
+  "Navegar hasta la funcionalidad indicada en el CU. Ruta exacta no definida
+  en la fuente; validar con equipo funcional."
+- Los estimados son complemento operativo: NO sustituyen ni resumen el detalle
+  real del CU.
+
+EJEMPLO DE DESCRIPTION:
+"Ruta estimada: Cotizadores Web → [módulo/funcionalidad indicada en el CU].
+Validar la ruta exacta con el equipo funcional. El escenario debe conservar
+además el contexto, reglas, datos, condiciones y resultado definidos en el CU."
+
+EJEMPLO DE STEP:
+"(Ruta estimada) Ingresar al módulo y seleccionar la funcionalidad indicada
+en el CU. Validar que se acceda a la funcionalidad correspondiente. La ruta
+exacta de menú debe ser confirmada con el equipo funcional."
+
+6. EXCEL AZURE — NO CAMBIAR ESTAS REGLAS
+- Un CP debe exportarse como un bloque: una fila de cabecera + todas sus filas de Steps.
+- En la cabecera: ID, Work Item Type, Title, Area Path, IDPadre, Tipo Origen Proyecto,
+  Tiempo Real, Assigned To y State.
+- En las filas de pasos: SOLO Test Step, Step Action y Step Expected.
 - Tipo Origen Proyecto = Proyecto.
 - Area Path = COTIZADORES WEB\\DESARROLLO.
 - IDPadre = vacío.
-- Un CP = una fila de cabecera + todas sus filas de Steps.
-- Las filas de Steps llevan SOLO Test Step, Step Action y Step Expected.
 - No crear un CP por cada Step.
-- No repetir metadatos del CP en las filas de Steps.
 """
-
 
 def generate_qa_data(
     prompt_text,
@@ -755,7 +800,7 @@ def generate_qa_data(
     max_source_chars = 120000
     if len(source_content) > max_source_chars:
         source_content = source_content[:max_source_chars] + (
-            "\n...[DOCUMENTO EXCEDE EL LÍMITE DE SEGURIDAD]"
+            "\n...[DOCUMENTO EXCEDE EL LÍMITE DE SEGURIDAD; PRIORIZAR LOS CU Y SU CONTEXTO FUNCIONAL]"
         )
 
     full_prompt = (
@@ -766,11 +811,12 @@ def generate_qa_data(
         + source_content
         + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
         "La HU/documentación actual es la única fuente de verdad funcional. "
-        "Cada CP debe usar el CU correspondiente como fuente principal y conservar sus detalles. "
-        "Si es necesario, incorpora el CU completo o casi completo en Description. "
-        "NO generes CP básicos. Debe existir mínimo un CP por cada CU y cada CP debe tener exactamente un CU. "
-        "Los Steps deben cubrir el flujo completo; nunca conviertas un Step en un CP independiente. "
-        "No inventes rutas, usuarios, datos, campos, mensajes, reglas ni valores.\n"
+        "Usa el CU completo como fuente principal del CP y conserva sus detalles. "
+        "Debe existir mínimo un CP por cada CU y cada CP debe corresponder a un solo CU. "
+        "No conviertas Steps en CP. "
+        "Puedes incluir rutas estimadas tanto en Description como en Steps cuando exista evidencia suficiente; "
+        "deben marcarse como Ruta estimada/Navegación sugerida y generar Validation Required. "
+        "No presentes una ruta estimada como confirmada ni inventes botones, URLs o menús sin sustento.\n"
         "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
@@ -952,7 +998,7 @@ def create_excel(data, config_key):
         # La cabecera contiene ID/Work Item Type/Title y metadatos.
         # Las filas siguientes contienen SOLO Test Step/Step Action/Step Expected.
         # Esta estructura evita que Azure interprete cada paso como un nuevo CP.
-        area_path = safe_text(config.get("area_path")) or "COTIZADORES WEB\\DESARROLLO"
+        area_path = "COTIZADORES WEB\\DESARROLLO"
         assigned_to = safe_text(config.get("assigned_to"))
         state = "Design"
         work_item_type = "Test Case"
