@@ -1,134 +1,115 @@
-# PROMPT QA — COBERTURA POR CASO DE USO
+# PROMPT QA — COBERTURA, PRODUCTO/MÓDULO Y EXCEL AZURE
 
-## REGLA OBLIGATORIA DE COBERTURA
+## 1. COBERTURA OBLIGATORIA
 
 Cada Caso de Uso (CU) identificado en la documentación DEBE tener como mínimo un Caso de Prueba (CP) propio.
 
-### Regla estricta
-
-**1 Test Case = 1 Caso de Uso.**
-
-No crear relaciones entre funcionalidades diferentes.
-
-Por lo tanto:
-
-- Cada CP debe estar asociado a un único CU.
-- `Related Use Case` debe contener un único CU.
-- Cada relación registrada en `COVERAGE` debe relacionar un CP con un único CU.
-- No colocar varios CU dentro del mismo Test Case.
-- No agrupar CU diferentes aunque pertenezcan a la misma HU, módulo, pantalla, proceso o flujo.
-- No considerar que mencionar varios CU dentro de Description o Steps equivale a cubrirlos.
-
-### Cobertura mínima
-
-Antes de finalizar la generación:
-
-1. Identificar todos los CU sustentados por la documentación.
-2. Generar como mínimo un CP independiente para cada CU.
-3. Verificar que ningún CU quede sin CP.
-4. Verificar que ningún CP esté relacionado con más de un CU.
-
-La cantidad mínima de CP debe corresponder al número de CU identificados.
-
-## ESCENARIOS ADICIONALES
-
-Después de garantizar el mínimo de un CP por cada CU, generar CP adicionales únicamente cuando la documentación sustente un comportamiento funcional diferente.
-
-Se pueden generar escenarios adicionales cuando existan, por ejemplo:
-
-- flujo principal y flujo alternativo documentados;
-- validaciones diferentes;
-- reglas de negocio diferentes;
-- condiciones diferentes;
-- errores documentados;
-- límites documentados;
-- estados diferentes;
-- perfiles o roles diferentes explícitamente definidos;
-- criterios de aceptación diferentes;
-- resultados esperados diferentes;
-- comportamientos funcionales distintos claramente sustentados.
-
-Los CP adicionales de un mismo CU siguen respetando:
+Regla estricta:
 
 **1 CP = 1 CU.**
 
-## NO EXAGERAR
+No relacionar un mismo CP con varios CU.
+No agrupar funcionalidades diferentes aunque pertenezcan a la misma HU, módulo, pantalla o flujo.
 
-No generar casos para aumentar artificialmente la cantidad.
+Cada CU debe aparecer individualmente en COVERAGE y tener al menos un CP.
 
-No crear casos casi idénticos.
+## 2. ESCENARIOS ADICIONALES
 
-No dividir artificialmente un mismo flujo.
+Después de garantizar el mínimo de un CP por CU, crear CP adicionales únicamente cuando la documentación sustente un comportamiento funcional diferente.
 
-No utilizar técnicas QA genéricas para inventar escenarios que no estén sustentados por la documentación.
+No exagerar.
+No duplicar.
+No fragmentar artificialmente.
+No inventar escenarios mediante técnicas QA genéricas no sustentadas.
 
-El objetivo es:
+## 3. PRODUCTO Y MÓDULO
 
-**Cobertura completa + escenarios suficientes + cantidad razonable.**
+Cuando la documentación corresponda a Autos Colectivos del aplicativo:
 
-No es objetivo generar la mayor cantidad posible de CP.
+- Producto: `Cotizadores Web`
+- Módulo: `Cotizador Autos Colectivos`
 
-## NO AGRUPAR FUNCIONALIDADES
+Usar exactamente estas denominaciones.
 
-Si existen:
+No usar variantes.
 
-- CU-001 Crear funcionalidad
-- CU-002 Validar funcionalidad
-- CU-003 Consultar funcionalidad
+Si la documentación corresponde a otro producto o módulo, no imponer estos valores.
 
-la salida mínima debe ser:
+## 4. NO INVENCIÓN
 
-- CP-001 → CU-001
-- CP-002 → CU-002
-- CP-003 → CU-003
+No inventar campos, datos, mensajes, reglas, perfiles, permisos, navegación ni resultados.
 
-Nunca:
+Si falta información, generar DRAFT y ALERTA.
 
-- CP-001 → CU-001 + CU-002
-- CP-002 → CU-003
+## 5. EXCEL PARA AZURE DEVOPS TEST PLANS
 
-Aunque las funcionalidades estén relacionadas funcionalmente.
+La aplicación debe generar una hoja llamada:
 
-## INFORMACIÓN INSUFICIENTE
+`Azure Import`
 
-Si un CU está documentado pero no existe suficiente información:
+Esta hoja debe ser directamente compatible con la importación masiva de Test Cases de Azure DevOps.
 
-- crear el CP DRAFT mínimo sustentado;
-- asociarlo exclusivamente a ese CU;
-- no inventar pasos, datos, mensajes, permisos, campos o resultados;
-- marcar la cobertura como Parcial o No cubierta;
-- generar ALERTA indicando qué información falta.
+Debe contener EXACTAMENTE estos 9 encabezados:
 
-## VALIDACIÓN FINAL
+1. `ID`
+2. `Work Item Type`
+3. `Title`
+4. `Test Step`
+5. `Step Action`
+6. `Step Expected`
+7. `Area Path`
+8. `Assigned To`
+9. `State`
 
-Antes de entregar la salida:
+### Reglas de valores
 
-- Todos los CU identificados tienen al menos un CP.
+- `ID`: dejar vacío para CP nuevos. No colocar aquí el ID funcional `CP-AC-...`.
+- `Work Item Type`: exactamente `Test Case`.
+- `Title`: incluir el ID funcional del agente, por ejemplo `CP-AC-AUTO-00001 - ...`.
+- `Test Step`: numeración secuencial 1, 2, 3...
+- `Step Action`: acción que realiza el tester.
+- `Step Expected`: resultado esperado de ese paso.
+- `Area Path`: debe corresponder a una ruta real existente en el proyecto Azure. No inventar.
+- `Assigned To`: debe ser un usuario real de la organización. No inventar.
+- `State`: exactamente `Design` para nuevos CP.
+
+### Regla de filas
+
+Cada Step debe ser una fila independiente.
+
+Para todas las filas pertenecientes al mismo CP se deben repetir:
+
+- ID
+- Work Item Type
+- Title
+- Area Path
+- Assigned To
+- State
+
+El `Test Step` cambia secuencialmente y también cambian `Step Action` y `Step Expected`.
+
+### Ejemplo
+
+ID | Work Item Type | Title | Test Step | Step Action | Step Expected | Area Path | Assigned To | State
+| | Test Case | CP-AC-AUTO-00001 - Crear cotización | 1 | Ingresar al cotizador | Se muestra el cotizador | [ruta real] | [usuario real] | Design
+| | Test Case | CP-AC-AUTO-00001 - Crear cotización | 2 | Seleccionar Autos Colectivos | Se muestra el módulo | [ruta real] | [usuario real] | Design
+
+## 6. MATRIZ QA
+
+La hoja `Matriz QA` debe conservar exactamente las columnas ya aprobadas por el proyecto.
+
+No agregar columnas adicionales a la Matriz QA por este ajuste.
+
+## 7. VALIDACIÓN FINAL
+
+Antes de entregar:
+
+- Todos los CU tienen mínimo un CP.
 - Cada CP tiene exactamente un CU.
-- Cada fila de COVERAGE tiene exactamente un CU.
 - No existen CP relacionados con varios CU.
-- Los escenarios adicionales tienen sustento documental.
-- No existen duplicados ni casos creados únicamente para aumentar cantidad.
-
-Reglas conceptuales:
-
-`Para cada CU: cantidad de CP asociados >= 1`
-
-`Para cada CP: cantidad de CU asociados = 1`
-
-## CONSERVAR
-
-No modificar:
-
-- estructura TEST_CASES;
-- estructura COVERAGE;
-- ALERTS;
-- IDs;
-- Steps;
-- Excel;
-- PDF;
-- Azure Import;
-- Matriz QA;
-- reglas de NO INVENCIÓN.
-
-Este ajuste modifica únicamente el criterio de cobertura y generación de escenarios.
+- Producto y Módulo usan la nomenclatura definida cuando corresponda.
+- La hoja Azure Import tiene exactamente los 9 encabezados oficiales.
+- Los CP nuevos tienen ID vacío en la columna Azure `ID`.
+- Cada Step es una fila.
+- Los campos requeridos de Azure se mantienen consistentes.
+- State = `Design`.

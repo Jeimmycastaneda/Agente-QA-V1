@@ -25,7 +25,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V18-CU-IND-DELETE"
+APP_VERSION = "V19-AZURE-XLSX"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -37,9 +37,11 @@ FALLBACK_MODELS = [
 # ============================================================
 # COLUMNAS APROBADAS — NO AGREGAR NI CAMBIAR TÍTULOS
 # ============================================================
+# Columnas EXACTAS requeridas por Azure DevOps Test Plans para importación XLSX.
+# Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP.
 AZURE_COLUMNS = [
-    "TestCaseId", "Title", "TestStep", "StepAction", "StepExpected",
-    "TestPointId", "Configuration", "Tester", "Outcome", "Comment"
+    "ID", "Work Item Type", "Title", "Test Step", "Step Action",
+    "Step Expected", "Area Path", "Assigned To", "State"
 ]
 
 MATRIZ_COLUMNS = [
@@ -58,6 +60,8 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-AC-",
         "user_default": "Usuario registrado",
         "steps_with_users": True,
+        "area_path": "",
+        "assigned_to": "",
     },
     "Siniestros Fasecolda": {
         "sheet_name": "28443;Fase 3 - RENK170 Siniestr",
@@ -68,6 +72,8 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-ACSF-",
         "user_default": "Suscriptor Oficina Principal, suscriptor sucursal autos",
         "steps_with_users": True,
+        "area_path": "",
+        "assigned_to": "",
     },
     "General QA": {
         "sheet_name": "Casos de Prueba",
@@ -78,6 +84,8 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-",
         "user_default": "",
         "steps_with_users": False,
+        "area_path": "",
+        "assigned_to": "",
     },
 }
 
@@ -593,6 +601,18 @@ def generate_qa_data(
 # EXCEL — ESTRUCTURA APROBADA
 # ============================================================
 def create_excel(data, config_key):
+    """
+    Genera:
+      1) Hoja 'Azure Import' con las 9 columnas requeridas por Azure DevOps.
+      2) Hoja 'Matriz QA' conservando la estructura aprobada.
+
+    Importante:
+    - Para CP nuevos, ID queda vacío.
+    - Cada paso es una fila.
+    - ID, Work Item Type, Title, Area Path, Assigned To y State se repiten
+      en cada fila del mismo CP, tal como solicita el importador de Azure.
+    - El ID funcional CP-AC-... se conserva dentro del Title, no en la columna ID.
+    """
     config = EXCEL_CONFIGS[config_key]
     output = io.BytesIO()
 
@@ -605,7 +625,11 @@ def create_excel(data, config_key):
         case_id = normalize_case_id(
             tc.get("ID"), module, idx, config["title_prefix"]
         )
-        title = build_case_title(tc, case_id)
+        title_base = build_case_title(tc, case_id)
+
+        # Conservamos nuestro identificador funcional en el título.
+        title = f"{case_id} - {title_base}" if not title_base.startswith(case_id) else title_base
+
         description = safe_text(tc.get("Description"))
         preconditions = safe_text(tc.get("Preconditions"))
         scenario = safe_text(tc.get("Scenario"), description)
@@ -614,7 +638,10 @@ def create_excel(data, config_key):
         coverage = find_coverage(data, tc)
 
         validation_method = normalize_validation_method(
-            coverage.get("Validation Method", tc.get("Validation Method", "Pendiente"))
+            coverage.get(
+                "Validation Method",
+                tc.get("Validation Method", "Pendiente")
+            )
         )
 
         coverage_value = normalize_coverage(
@@ -635,83 +662,94 @@ def create_excel(data, config_key):
             if general_alerts:
                 alerts = " | ".join(general_alerts)
 
-        # Azure Import
-        azure_case_id = config["base_id"] + idx - 1
-        test_point_id = f"{config['base_testpoint'] + idx - 1}:0"
-
-        azure_rows.append({
-            "TestCaseId": azure_case_id,
-            "Title": title,
-            "TestStep": "",
-            "StepAction": "",
-            "StepExpected": "",
-            "TestPointId": test_point_id,
-            "Configuration": config["configuration"],
-            "Tester": config["tester"],
-            "Outcome": "",
-            "Comment": "",
-        })
+        # --------------------------------------------------------
+        # AZURE IMPORT
+        # --------------------------------------------------------
+        # Azure crea un nuevo CP cuando ID está vacío.
+        # Repetimos los campos de cabecera en TODAS las filas del CP.
+        area_path = safe_text(config.get("area_path"))
+        assigned_to = safe_text(config.get("assigned_to"))
+        state = "Design"
+        work_item_type = "Test Case"
 
         if not steps:
-            azure_rows.append({
-                "TestCaseId": "",
-                "Title": "",
-                "TestStep": 1,
-                "StepAction": "Información insuficiente para definir el paso.",
-                "StepExpected": "Validar con el equipo funcional antes de ejecutar.",
-                "TestPointId": "",
-                "Configuration": "",
-                "Tester": "",
-                "Outcome": "",
-                "Comment": "ALERTA: caso sin pasos definidos.",
-            })
+            steps_for_export = [{
+                "Step #": 1,
+                "Action": "Información insuficiente para definir el paso.",
+                "Expected value": "Validar con el equipo funcional antes de ejecutar.",
+            }]
+            comment = "ALERTA: caso sin pasos definidos."
         else:
-            for step_index, step in enumerate(steps, start=1):
-                azure_rows.append({
-                    "TestCaseId": "",
-                    "Title": "",
-                    "TestStep": step.get("Step #", step_index),
-                    "StepAction": safe_text(
-                        step.get("Action"), "Acción no definida"
-                    ),
-                    "StepExpected": safe_text(
-                        step.get("Expected value"),
-                        "Resultado esperado no definido",
-                    ),
-                    "TestPointId": "",
-                    "Configuration": "",
-                    "Tester": "",
-                    "Outcome": "",
-                    "Comment": "",
-                })
+            steps_for_export = steps
+            comment = ""
 
-        # Matriz QA
+        for step_index, step in enumerate(steps_for_export, start=1):
+            azure_rows.append({
+                "ID": "",
+                "Work Item Type": work_item_type,
+                "Title": title,
+                "Test Step": step_index,
+                "Step Action": safe_text(
+                    step.get("Action"),
+                    "Acción no definida",
+                ),
+                "Step Expected": safe_text(
+                    step.get("Expected value"),
+                    "Resultado esperado no definido",
+                ),
+                "Area Path": area_path,
+                "Assigned To": assigned_to,
+                "State": state,
+            })
+
+        # --------------------------------------------------------
+        # MATRIZ QA — se conserva sin cambios de columnas.
+        # --------------------------------------------------------
         matriz_rows.append({
             "TestCaseId": case_id,
             "Title": title,
             "Requirement / Use Case": safe_text(
-                coverage.get("Requirement / Use Case", tc.get("Related Use Case"))
+                coverage.get(
+                    "Requirement / Use Case",
+                    tc.get("Related Use Case")
+                )
             ),
             "Criterion": safe_text(
                 coverage.get("Criterion", tc.get("Criterion"))
             ),
             "Scenario": scenario,
-            "Scenario Type": safe_text(tc.get("Scenario Type"), "No definido"),
+            "Scenario Type": safe_text(
+                tc.get("Scenario Type"),
+                "No definido"
+            ),
             "Description": description,
             "Preconditions": preconditions,
             "Validation Method": validation_method,
             "Coverage": coverage_value,
             "Alerts": alerts,
-            "Effort": safe_text(tc.get("Effort"), "No definido"),
+            "Effort": safe_text(
+                tc.get("Effort"),
+                "No definido"
+            ),
         })
 
     df_azure = pd.DataFrame(azure_rows, columns=AZURE_COLUMNS)
     df_matriz = pd.DataFrame(matriz_rows, columns=MATRIZ_COLUMNS)
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        azure_sheet = config["sheet_name"][:31]
-        df_azure.to_excel(writer, sheet_name=azure_sheet, index=False)
-        df_matriz.to_excel(writer, sheet_name="Matriz QA", index=False)
+        # Hoja compatible con Azure DevOps Test Plans.
+        df_azure.to_excel(
+            writer,
+            sheet_name="Azure Import",
+            index=False,
+        )
+
+        # Matriz aprobada.
+        df_matriz.to_excel(
+            writer,
+            sheet_name="Matriz QA",
+            index=False,
+        )
 
         for ws in writer.book.worksheets:
             ws.freeze_panes = "A2"
@@ -1324,6 +1362,13 @@ if result:
                 st.rerun()
     else:
         st.info("No hay Test Cases para editar.")
+
+    if not safe_text(EXCEL_CONFIGS[selected_config].get("area_path")) or not safe_text(EXCEL_CONFIGS[selected_config].get("assigned_to")):
+        st.warning(
+            "⚠️ El Excel ya usa las 9 columnas requeridas por Azure DevOps. "
+            "Antes de importar, configura Area Path y Assigned To en EXCEL_CONFIGS "
+            "con valores reales de tu proyecto/organización; no se inventan automáticamente."
+        )
 
     st.download_button(
         "📊 Descargar Excel",
