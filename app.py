@@ -25,7 +25,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V24-REDACCION-COBERTURA-CU"
+APP_VERSION = "V27-AZURE-REAL"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -41,7 +41,8 @@ FALLBACK_MODELS = [
 # Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP.
 AZURE_COLUMNS = [
     "ID", "Work Item Type", "Title", "Test Step", "Step Action",
-    "Step Expected", "Area Path", "Assigned To", "State"
+    "Step Expected", "Area Path", "IDPadre", "Tiempo Real",
+    "Assigned To", "State"
 ]
 
 MATRIZ_COLUMNS = [
@@ -375,8 +376,6 @@ def extract_csv(uploaded_file):
     return df.fillna("").to_csv(index=False)
 
 
-
-
 def extract_source(uploaded_file):
     extension = uploaded_file.name.rsplit(".", 1)[-1].lower()
 
@@ -455,6 +454,43 @@ def validate_qa_structure(data):
     return data
 
 
+def validate_coverage_rules(data):
+    """Valida las reglas críticas: mínimo un CP por CU y un CU por CP."""
+    cases = data.get("TEST_CASES", []) or []
+    coverage = data.get("COVERAGE", []) or []
+
+    def norm(v):
+        return re.sub(r"\s+", " ", safe_text(v)).strip().lower()
+
+    cp_to_cu = {}
+    for tc in cases:
+        cp_id = safe_text(tc.get("ID"))
+        cu = safe_text(tc.get("Related Use Case"))
+        if not cp_id:
+            raise ValueError("Existe un Test Case sin ID.")
+        if not cu:
+            raise ValueError(f"{cp_id} no tiene Caso de Uso relacionado.")
+        key = norm(cp_id)
+        if key in cp_to_cu and norm(cp_to_cu[key]) != norm(cu):
+            raise ValueError(f"{cp_id} aparece asociado a más de un Caso de Uso.")
+        cp_to_cu[key] = cu
+
+    expected_cus = []
+    for row in coverage:
+        cu = safe_text(row.get("Requirement / Use Case"))
+        if cu and norm(cu) not in [norm(x) for x in expected_cus]:
+            expected_cus.append(cu)
+
+    covered = {norm(v) for v in cp_to_cu.values()}
+    missing = [cu for cu in expected_cus if norm(cu) not in covered]
+    if missing:
+        raise ValueError(
+            "Cobertura incompleta: no existe al menos un CP para estos CU: "
+            + ", ".join(missing[:20])
+        )
+
+    return data
+
 def _is_gemini_3x(model_name):
     return safe_text(model_name).lower().startswith(("gemini-3.", "gemini-3"))
 
@@ -517,11 +553,9 @@ def generate_qa_data(
         prompt_text
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
-        + "\n\n==================== REGLA DE FUENTE ====================\n"
-        "REGLA CRITICA DE COBERTURA: identifica todos los Casos de Uso de la HU y genera como minimo un Test Case independiente por cada CU. Ningun CU puede quedar sin cobertura; cada CP debe tener exactamente un Related Use Case. Verifica la cobertura antes de entregar. "
-        "La HU/documentación actual es la única fuente de verdad para el contenido funcional. "
-        "No inventes usuarios, perfiles, rutas, URLs, campos, mensajes, permisos, valores, "
-        "reglas, estados ni resultados.\n"
+        + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
+        "La HU/documentación actual es la única fuente de verdad funcional. "
+        "No inventes rutas, usuarios, datos, campos, mensajes, reglas ni valores.\n"
         "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
@@ -568,6 +602,7 @@ def generate_qa_data(
                     data = json.loads(match.group(1))
 
                 validated = validate_qa_structure(data)
+                validated = validate_coverage_rules(validated)
 
                 st.session_state.quota_exceeded = False
                 st.session_state.retry_count = 0
@@ -636,7 +671,7 @@ def generate_qa_data(
 def create_excel(data, config_key):
     """
     Genera:
-      1) Hoja 'Azure Import' con las 9 columnas requeridas por Azure DevOps.
+      1) Hoja 'Azure Import' con las 11 columnas de la plantilla real exportada desde Azure.
       2) Hoja 'Matriz QA' conservando la estructura aprobada.
 
     Importante:
@@ -731,6 +766,8 @@ def create_excel(data, config_key):
                     "Resultado esperado no definido",
                 ),
                 "Area Path": area_path,
+                "IDPadre": "",
+                "Tiempo Real": "",
                 "Assigned To": assigned_to,
                 "State": state,
             })
