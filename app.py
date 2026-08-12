@@ -194,8 +194,6 @@ MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
 ]
 
 # ============================================================
@@ -743,7 +741,6 @@ def generate_qa_data(
 
                 validated = validate_qa_structure(data)
                 validate_minimum_cu_coverage(validated)
-                validated = validate_coverage_rules_legacy(validated)
 
                 st.session_state.quota_exceeded = False
                 st.session_state.retry_count = 0
