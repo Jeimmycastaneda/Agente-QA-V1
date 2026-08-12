@@ -19,37 +19,168 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
-# ===== V28: VALIDACIÓN OBLIGATORIA DE COBERTURA POR CU =====
+# ===== V30: COBERTURA OBLIGATORIA POR CU =====
 def _normalize_cu(value):
     if value is None:
         return ""
-    return str(value).strip().upper()
+    return re.sub(r"\s+", " ", str(value).strip()).casefold()
 
-def validate_minimum_cu_coverage(cases, identified_use_cases):
-    """
-    Regla obligatoria:
-    - Cada CU identificado debe tener al menos un CP.
-    - Cada CP debe apuntar a un único CU.
-    Devuelve (ok, missing_cus, invalid_cases).
-    """
-    identified = {_normalize_cu(x) for x in (identified_use_cases or []) if _normalize_cu(x)}
-    covered = set()
-    invalid_cases = []
 
-    for idx, case in enumerate(cases or [], start=1):
-        cu = case.get("related_use_case") or case.get("use_case") or case.get("Requirement / Use Case") or case.get("Related Use Case")
-        if isinstance(cu, (list, tuple, set)):
-            cu_values = [_normalize_cu(x) for x in cu if _normalize_cu(x)]
+def _extract_related_cu(tc):
+    value = (
+        tc.get("Related Use Case")
+        or tc.get("related_use_case")
+        or tc.get("use_case")
+        or tc.get("Requirement / Use Case")
+        or tc.get("Caso de uso relacionado")
+        or ""
+    )
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    parts = [x.strip() for x in re.split(r"[;\n|]", str(value)) if x.strip()]
+    return parts
+
+
+def calculate_cu_coverage(cases, identified_use_cases):
+    """Mínimo 1 CP por cada CU y exactamente 1 CU por CP."""
+    cu_map = {}
+    for cu in identified_use_cases or []:
+        if isinstance(cu, dict):
+            cid = str(
+                cu.get("ID") or cu.get("id") or
+                cu.get("Use Case ID") or cu.get("CU") or ""
+            ).strip()
+            name = str(
+                cu.get("Name") or cu.get("name") or
+                cu.get("Title") or cu.get("Description") or ""
+            ).strip()
         else:
-            cu_values = [_normalize_cu(cu)] if _normalize_cu(cu) else []
+            cid = str(cu).strip()
+            name = cid
+        if cid:
+            cu_map[_normalize_cu(cid)] = {"id": cid, "name": name or cid}
 
-        if len(cu_values) != 1:
-            invalid_cases.append(idx)
+    covered = {}
+    cp_without_cu = []
+    cp_multiple_cu = []
+
+    for index, tc in enumerate(cases or [], start=1):
+        cp_id = str(tc.get("ID") or f"CP-{index:05d}").strip()
+        relations = _extract_related_cu(tc)
+
+        if len(relations) == 0:
+            cp_without_cu.append(cp_id)
+            continue
+        if len(relations) != 1:
+            cp_multiple_cu.append(cp_id)
+            continue
+
+        rel = _normalize_cu(relations[0])
+        matched = None
+        for cu_key, cu_info in cu_map.items():
+            if rel == cu_key or rel == _normalize_cu(cu_info["name"]):
+                matched = cu_key
+                break
+
+        if matched is None:
+            cp_without_cu.append(cp_id)
         else:
-            covered.add(cu_values[0])
+            covered.setdefault(matched, []).append(cp_id)
 
-    missing = sorted(identified - covered)
-    return len(missing) == 0 and len(invalid_cases) == 0, missing, invalid_cases
+    missing = [
+        info for key, info in cu_map.items()
+        if key not in covered
+    ]
+
+    total_cu = len(cu_map)
+    total_cp = len(cases or [])
+    covered_count = len(covered)
+    percentage = round((covered_count / total_cu) * 100, 1) if total_cu else 0.0
+
+    return {
+        "total_cu": total_cu,
+        "total_cp": total_cp,
+        "covered_cu": covered_count,
+        "missing_cu": missing,
+        "cp_without_cu": cp_without_cu,
+        "cp_multiple_cu": cp_multiple_cu,
+        "percentage": percentage,
+        "valid": (
+            total_cu > 0
+            and not missing
+            and not cp_without_cu
+            and not cp_multiple_cu
+        ),
+    }
+
+
+def validate_minimum_cu_coverage(data):
+    """Bloquea cualquier resultado que no cubra todos los CU."""
+    cases = data.get("TEST_CASES", []) or []
+    use_cases = data.get("USE_CASES", []) or []
+
+    if not use_cases:
+        raise ValueError(
+            "GENERACIÓN BLOQUEADA: Gemini no devolvió la lista completa de Casos de Uso (USE_CASES)."
+        )
+
+    metrics = calculate_cu_coverage(cases, use_cases)
+
+    if not metrics["valid"]:
+        missing = ", ".join(
+            f'{x["id"]} - {x["name"]}'
+            for x in metrics["missing_cu"]
+        )
+        details = []
+        if missing:
+            details.append("CU sin CP: " + missing)
+        if metrics["cp_without_cu"]:
+            details.append(
+                "CP sin CU válido: " + ", ".join(metrics["cp_without_cu"])
+            )
+        if metrics["cp_multiple_cu"]:
+            details.append(
+                "CP con más de un CU: " + ", ".join(metrics["cp_multiple_cu"])
+            )
+        raise ValueError(
+            f'COBERTURA INCOMPLETA: {metrics["covered_cu"]}/'
+            f'{metrics["total_cu"]} CU cubiertos '
+            f'({metrics["percentage"]}%). '
+            + " | ".join(details)
+        )
+
+    return metrics
+
+
+def render_cu_coverage(metrics):
+    st.markdown("### 📊 Cobertura mínima por Caso de Uso")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("CU identificados", metrics["total_cu"])
+    c2.metric("CP generados", metrics["total_cp"])
+    c3.metric("CU cubiertos", metrics["covered_cu"])
+    c4.metric("Cobertura", f'{metrics["percentage"]}%')
+
+    if metrics["valid"]:
+        st.success("✅ Cobertura completa: cada CU tiene mínimo un CP.")
+    else:
+        st.error(
+            f'🔴 Cobertura incompleta: {metrics["covered_cu"]}/'
+            f'{metrics["total_cu"]} CU cubiertos. '
+            f'Faltan {len(metrics["missing_cu"])} CU.'
+        )
+        if metrics["missing_cu"]:
+            with st.expander("Ver CU sin Caso de Prueba", expanded=True):
+                for cu in metrics["missing_cu"]:
+                    st.write(f'• **{cu["id"]}** — {cu["name"]}')
+        if metrics["cp_without_cu"]:
+            st.warning(
+                "CP sin CU válido: " + ", ".join(metrics["cp_without_cu"])
+            )
+        if metrics["cp_multiple_cu"]:
+            st.warning(
+                "CP relacionados con más de un CU: "
+                + ", ".join(metrics["cp_multiple_cu"])
+            )
 
 try:
     from google import genai
@@ -58,7 +189,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V27-AZURE-REAL"
+APP_VERSION = "V30-AZURE-CU-COVERAGE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -126,6 +257,17 @@ EXCEL_CONFIGS = {
 SCHEMA = {
     "type": "object",
     "properties": {
+        "USE_CASES": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ID": {"type": "string"},
+                    "Name": {"type": "string"}
+                },
+                "required": ["ID", "Name"]
+            }
+        },
         "TEST_CASES": {
             "type": "array",
             "items": {
@@ -202,7 +344,7 @@ SCHEMA = {
             },
         },
     },
-    "required": ["TEST_CASES", "ALERTS", "COVERAGE"],
+    "required": ["USE_CASES", "TEST_CASES", "ALERTS", "COVERAGE"],
 }
 
 
@@ -471,9 +613,12 @@ def validate_qa_structure(data):
     if not isinstance(data, dict):
         raise ValueError("La respuesta de Gemini no es un objeto JSON.")
 
-    for key in ("TEST_CASES", "ALERTS", "COVERAGE"):
+    for key in ("USE_CASES", "TEST_CASES", "ALERTS", "COVERAGE"):
         if key not in data:
             raise ValueError(f"Falta la clave requerida: {key}")
+
+    if not isinstance(data["USE_CASES"], list) or not data["USE_CASES"]:
+        raise ValueError("Gemini no devolvió los Casos de Uso identificados.")
 
     if not isinstance(data["TEST_CASES"], list) or not data["TEST_CASES"]:
         raise ValueError("No se generaron casos de prueba.")
@@ -483,44 +628,6 @@ def validate_qa_structure(data):
 
     if not isinstance(data["COVERAGE"], list):
         data["COVERAGE"] = []
-
-    return data
-
-
-def validate_coverage_rules(data):
-    """Valida las reglas críticas: mínimo un CP por CU y un CU por CP."""
-    cases = data.get("TEST_CASES", []) or []
-    coverage = data.get("COVERAGE", []) or []
-
-    def norm(v):
-        return re.sub(r"\s+", " ", safe_text(v)).strip().lower()
-
-    cp_to_cu = {}
-    for tc in cases:
-        cp_id = safe_text(tc.get("ID"))
-        cu = safe_text(tc.get("Related Use Case"))
-        if not cp_id:
-            raise ValueError("Existe un Test Case sin ID.")
-        if not cu:
-            raise ValueError(f"{cp_id} no tiene Caso de Uso relacionado.")
-        key = norm(cp_id)
-        if key in cp_to_cu and norm(cp_to_cu[key]) != norm(cu):
-            raise ValueError(f"{cp_id} aparece asociado a más de un Caso de Uso.")
-        cp_to_cu[key] = cu
-
-    expected_cus = []
-    for row in coverage:
-        cu = safe_text(row.get("Requirement / Use Case"))
-        if cu and norm(cu) not in [norm(x) for x in expected_cus]:
-            expected_cus.append(cu)
-
-    covered = {norm(v) for v in cp_to_cu.values()}
-    missing = [cu for cu in expected_cus if norm(cu) not in covered]
-    if missing:
-        raise ValueError(
-            "Cobertura incompleta: no existe al menos un CP para estos CU: "
-            + ", ".join(missing[:20])
-        )
 
     return data
 
@@ -635,7 +742,8 @@ def generate_qa_data(
                     data = json.loads(match.group(1))
 
                 validated = validate_qa_structure(data)
-                validated = validate_coverage_rules(validated)
+                validate_minimum_cu_coverage(validated)
+                validated = validate_coverage_rules_legacy(validated)
 
                 st.session_state.quota_exceeded = False
                 st.session_state.retry_count = 0
@@ -1198,6 +1306,22 @@ def create_pdf(data, config_key, source_name=""):
     return buffer.getvalue()
 
 
+
+def coverage_gate_or_stop(data):
+    """Renderiza métricas y detiene el flujo si la cobertura es incompleta."""
+    metrics = calculate_cu_coverage(
+        data.get("TEST_CASES", []),
+        data.get("USE_CASES", [])
+    )
+    render_cu_coverage(metrics)
+    if not metrics["valid"]:
+        st.error(
+            "🚫 EXPORTACIÓN BLOQUEADA: cada Caso de Uso debe tener mínimo un Caso de Prueba."
+        )
+        st.stop()
+    return metrics
+
+
 # ============================================================
 # INTERFAZ
 # ============================================================
@@ -1353,6 +1477,9 @@ if st.button(
                 int(wait_time),
             )
 
+        # Regla obligatoria: validar cobertura antes de exportar.
+        coverage_metrics = coverage_gate_or_stop(result)
+
         st.session_state.result_json = result
         st.session_state.excel_data = create_excel(
             result,
@@ -1382,7 +1509,13 @@ if result:
     c1, c2, c3 = st.columns(3)
     c1.metric("Casos", len(result.get("TEST_CASES", [])))
     c2.metric("Alertas", len(result.get("ALERTS", [])))
-    c3.metric("Cobertura", len(result.get("COVERAGE", [])))
+    c3.metric("CUs", len(result.get("USE_CASES", [])))
+
+    current_coverage = calculate_cu_coverage(
+        result.get("TEST_CASES", []),
+        result.get("USE_CASES", [])
+    )
+    render_cu_coverage(current_coverage)
 
     # ========================================================
     # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
@@ -1422,17 +1555,30 @@ if result:
         editor_result = render_azure_style_editor(selected_case, selected_index)
 
         if editor_result == "saved":
-            st.session_state.excel_data = create_excel(result, selected_config)
-            st.session_state.pdf_data = create_pdf(
-                result,
-                selected_config,
-                st.session_state.get("source_name", ""),
-            )
-            st.success(
-                f"✅ {selected_case_id} actualizado. "
-                "Excel y PDF regenerados."
-            )
-            st.rerun()
+            try:
+                coverage_after_edit = calculate_cu_coverage(
+                    result.get("TEST_CASES", []),
+                    result.get("USE_CASES", [])
+                )
+                if not coverage_after_edit["valid"]:
+                    st.error(
+                        "🚫 El cambio dejaría un CU sin CP. "
+                        "Corrige la relación antes de exportar."
+                    )
+                else:
+                    st.session_state.excel_data = create_excel(result, selected_config)
+                    st.session_state.pdf_data = create_pdf(
+                        result,
+                        selected_config,
+                        st.session_state.get("source_name", ""),
+                    )
+                    st.success(
+                        f"✅ {selected_case_id} actualizado. "
+                        "Excel y PDF regenerados."
+                    )
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"❌ No se pudo guardar el cambio: {exc}")
 
         st.divider()
         st.markdown("### 🗑️ Eliminar caso de prueba")
@@ -1454,7 +1600,21 @@ if result:
             key=f"v13_delete_cp_{selected_index}",
         ):
             deleted_id = selected_case_id
-            if delete_test_case(result, selected_index):
+            # Simular eliminación antes de aplicarla para preservar 1 CP mínimo por CU.
+            candidate_cases = [
+                tc for i, tc in enumerate(result.get("TEST_CASES", []))
+                if i != selected_index
+            ]
+            deletion_coverage = calculate_cu_coverage(
+                candidate_cases,
+                result.get("USE_CASES", [])
+            )
+
+            if not deletion_coverage["valid"]:
+                st.error(
+                    "🚫 No se puede eliminar este CP porque dejaría al menos un CU sin cobertura."
+                )
+            elif delete_test_case(result, selected_index):
                 st.session_state.excel_data = create_excel(result, selected_config)
                 st.session_state.pdf_data = create_pdf(
                     result,
@@ -1473,6 +1633,16 @@ if result:
             "con valores reales de tu proyecto/organización; no se inventan automáticamente."
         )
 
+    coverage_ok_for_download = calculate_cu_coverage(
+        result.get("TEST_CASES", []),
+        result.get("USE_CASES", [])
+    )["valid"]
+
+    if not coverage_ok_for_download:
+        st.error(
+            "🚫 Descargas deshabilitadas: la cobertura mínima por CU no se cumple."
+        )
+
     st.download_button(
         "📊 Descargar Excel",
         data=st.session_state.excel_data,
@@ -1483,6 +1653,7 @@ if result:
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
         ),
+        disabled=not coverage_ok_for_download,
     )
 
     st.download_button(
@@ -1492,6 +1663,7 @@ if result:
             f"QA_DRAFT_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         ),
         mime="application/pdf",
+        disabled=not coverage_ok_for_download,
     )
 
     with st.expander("🔎 Ver JSON generado", expanded=False):
@@ -1522,20 +1694,3 @@ if result:
         pd.DataFrame(preview_rows),
         use_container_width=True,
     )
-
-
-def require_cu_coverage_before_export(cases, identified_use_cases):
-    ok, missing_cus, invalid_cases = validate_minimum_cu_coverage(
-        cases, identified_use_cases
-    )
-    if not ok:
-        details = []
-        if missing_cus:
-            details.append("CU sin CP: " + ", ".join(missing_cus))
-        if invalid_cases:
-            details.append("CP con relación distinta de 1 CU: " + ", ".join(map(str, invalid_cases)))
-        raise ValueError(
-            "GENERACIÓN BLOQUEADA: cada CU debe tener mínimo un CP. " +
-            " | ".join(details)
-        )
-    return True
