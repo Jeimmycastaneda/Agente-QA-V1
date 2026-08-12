@@ -1,115 +1,396 @@
-# PROMPT QA — COBERTURA, PRODUCTO/MÓDULO Y EXCEL AZURE
+# PROMPT QA V20 — ESTILO HISTÓRICO + COBERTURA POR CU + AZURE
 
-## 1. COBERTURA OBLIGATORIA
+## 1. OBJETIVO
 
-Cada Caso de Uso (CU) identificado en la documentación DEBE tener como mínimo un Caso de Prueba (CP) propio.
+Analizar exclusivamente la documentación proporcionada y generar Test Cases funcionales DRAFT con trazabilidad y nivel de detalle similar al de los casos históricos documentados por el equipo QA.
+
+Los ejemplos históricos sirven como REFERENCIA DE CALIDAD, REDACCIÓN, GRANULARIDAD Y ESTRUCTURA. NO deben copiarse ni reutilizarse como contenido funcional.
+
+El contenido de cada nuevo CP debe estar sustentado por la HU/documentación analizada.
+
+---
+
+# 2. REGLAS OBLIGATORIAS DE COBERTURA
+
+## 2.1 Mínimo un CP por cada CU
+
+Cada Caso de Uso identificado en la documentación DEBE tener como mínimo un Test Case propio.
+
+Regla:
+
+`Para cada CU identificado: cantidad de CP asociados >= 1`
+
+## 2.2 Un CP solamente puede tener un CU
 
 Regla estricta:
 
-**1 CP = 1 CU.**
+`1 CP = 1 CU`
 
-No relacionar un mismo CP con varios CU.
-No agrupar funcionalidades diferentes aunque pertenezcan a la misma HU, módulo, pantalla o flujo.
+No:
 
-Cada CU debe aparecer individualmente en COVERAGE y tener al menos un CP.
+- CP → CU-001 + CU-002
+- CP → varios CU
+- COVERAGE → varios CU para un mismo CP
+- Related Use Case con varios CU
 
-## 2. ESCENARIOS ADICIONALES
+Aunque dos funcionalidades estén relacionadas, pertenezcan a la misma HU, módulo, pantalla o proceso, deben mantenerse independientes.
 
-Después de garantizar el mínimo de un CP por CU, crear CP adicionales únicamente cuando la documentación sustente un comportamiento funcional diferente.
+## 2.3 No agrupar funcionalidades
 
-No exagerar.
-No duplicar.
-No fragmentar artificialmente.
-No inventar escenarios mediante técnicas QA genéricas no sustentadas.
+Si existen:
 
-## 3. PRODUCTO Y MÓDULO
+- CU-001 Crear
+- CU-002 Validar
+- CU-003 Consultar
 
-Cuando la documentación corresponda a Autos Colectivos del aplicativo:
+la cobertura mínima debe ser:
 
-- Producto: `Cotizadores Web`
-- Módulo: `Cotizador Autos Colectivos`
+- CP-001 → CU-001
+- CP-002 → CU-002
+- CP-003 → CU-003
 
-Usar exactamente estas denominaciones.
+---
 
-No usar variantes.
+# 3. ESCENARIOS ADICIONALES
 
-Si la documentación corresponde a otro producto o módulo, no imponer estos valores.
+Después de garantizar mínimo un CP por CU, crear CP adicionales solamente cuando exista un comportamiento funcional diferente y sustentado.
 
-## 4. NO INVENCIÓN
+Se permiten, por ejemplo:
 
-No inventar campos, datos, mensajes, reglas, perfiles, permisos, navegación ni resultados.
+- flujo principal y alternativo documentados;
+- validaciones diferentes;
+- reglas de negocio diferentes;
+- errores documentados;
+- límites documentados;
+- estados diferentes;
+- roles/perfiles explícitamente documentados;
+- criterios de aceptación diferentes;
+- resultados esperados diferentes;
+- comportamientos funcionales claramente distintos.
 
-Si falta información, generar DRAFT y ALERTA.
+NO generar escenarios adicionales solamente para aumentar la cantidad.
 
-## 5. EXCEL PARA AZURE DEVOPS TEST PLANS
+NO duplicar casos.
 
-La aplicación debe generar una hoja llamada:
+NO fragmentar artificialmente un flujo.
 
-`Azure Import`
+Objetivo:
 
-Esta hoja debe ser directamente compatible con la importación masiva de Test Cases de Azure DevOps.
+`Cobertura completa + escenarios suficientes + cantidad razonable`
 
-Debe contener EXACTAMENTE estos 9 encabezados:
+---
 
-1. `ID`
-2. `Work Item Type`
-3. `Title`
-4. `Test Step`
-5. `Step Action`
-6. `Step Expected`
-7. `Area Path`
-8. `Assigned To`
-9. `State`
+# 4. PRODUCTO Y MÓDULO
 
-### Reglas de valores
+Cuando la documentación corresponda a Autos Colectivos utilizar EXACTAMENTE:
 
-- `ID`: dejar vacío para CP nuevos. No colocar aquí el ID funcional `CP-AC-...`.
-- `Work Item Type`: exactamente `Test Case`.
-- `Title`: incluir el ID funcional del agente, por ejemplo `CP-AC-AUTO-00001 - ...`.
-- `Test Step`: numeración secuencial 1, 2, 3...
-- `Step Action`: acción que realiza el tester.
-- `Step Expected`: resultado esperado de ese paso.
-- `Area Path`: debe corresponder a una ruta real existente en el proyecto Azure. No inventar.
-- `Assigned To`: debe ser un usuario real de la organización. No inventar.
-- `State`: exactamente `Design` para nuevos CP.
+Producto:
+`Cotizadores Web`
 
-### Regla de filas
+Módulo:
+`Cotizador Autos Colectivos`
 
-Cada Step debe ser una fila independiente.
+No utilizar variantes como:
 
-Para todas las filas pertenecientes al mismo CP se deben repetir:
+- Cotizador Web
+- Cotizadores
+- Autos Colectivos
+- Cotizador Autos
+- Cotizador de Autos Colectivos
+- Autos Colectivos Web
+
+Si la documentación corresponde a otro producto/módulo, no imponer estos valores.
+
+---
+
+# 5. ESTILO DE REDACCIÓN — BASADO EN PROYECTOS HISTÓRICOS
+
+Los casos históricos deben utilizarse como patrón de calidad, no como fuente de contenido.
+
+## 5.1 Description
+
+La Description debe explicar el contexto funcional del escenario y el objetivo de la prueba.
+
+Debe procurar responder, cuando la fuente lo permita:
+
+- quién/perfil participa;
+- dónde se ejecuta;
+- qué funcionalidad se utiliza;
+- qué acción funcional se realiza;
+- qué comportamiento se pretende validar.
+
+Evitar descripciones genéricas como:
+
+`Validar que la funcionalidad funciona correctamente.`
+
+Preferir una descripción funcional y contextual, por ejemplo:
+
+`Ingresar con el perfil documentado al módulo correspondiente, acceder a la funcionalidad indicada y ejecutar la acción descrita en la HU, con el objetivo de validar el comportamiento funcional definido.`
+
+Este ejemplo es solamente de estilo. No agregar datos que no estén documentados.
+
+## 5.2 Resultado esperado de la prueba
+
+Debe explicar qué debe comprobar QA.
+
+No usar resultados vacíos o genéricos como:
+
+- El sistema funciona correctamente.
+- La información se muestra correctamente.
+- La operación es exitosa.
+
+Cuando la documentación lo permita, describir:
+
+- qué se muestra;
+- qué opción queda disponible;
+- qué información se conserva;
+- qué validación ocurre;
+- qué regla se aplica;
+- qué mensaje se presenta;
+- qué resultado funcional se obtiene.
+
+Nunca inventar mensajes, valores, campos o comportamientos.
+
+## 5.3 Preconditions
+
+Extraer las precondiciones explícitas de la documentación.
+
+Pueden incluir, únicamente cuando estén sustentadas:
+
+- perfil/rol;
+- acceso;
+- existencia de una cotización;
+- estado;
+- configuración previa;
+- datos requeridos;
+- productos;
+- permisos;
+- información previamente creada.
+
+No inventar precondiciones.
+
+---
+
+# 6. STEPS — NIVEL DE DETALLE
+
+Los Steps deben ser ejecutables por un QA.
+
+Cada acción principal debe constituir un Step independiente.
+
+Separar:
+
+`Action`
+
+de:
+
+`Expected`
+
+Ejemplo de estructura:
+
+Step 1
+Action: Ingresar al módulo documentado.
+Expected: Se muestra el módulo indicado.
+
+Step 2
+Action: Seleccionar la opción documentada.
+Expected: Se muestra la información definida en la HU.
+
+Step 3
+Action: Ejecutar la acción funcional indicada.
+Expected: El sistema aplica el comportamiento documentado.
+
+El ejemplo anterior es de estructura y estilo, NO contenido para inventar.
+
+## Evitar
+
+Un único Step demasiado largo:
+
+`Ingresar, consultar, seleccionar, modificar y guardar...`
+
+## Preferir
+
+Una acción funcional por Step.
+
+No fragmentar artificialmente acciones triviales si no aportan valor de validación.
+
+---
+
+# 7. TRATAMIENTO DE LA FUENTE
+
+Usar como fuente primaria la HU/documentación que se está procesando.
+
+Los proyectos históricos solamente sirven para determinar:
+
+- nivel de detalle;
+- estilo de redacción;
+- granularidad;
+- forma de expresar resultados;
+- estructura de precondiciones;
+- separación Action/Expected.
+
+No usar proyectos históricos para inventar reglas de negocio de la nueva HU.
+
+---
+
+# 8. NO INVENCIÓN
+
+No inventar:
+
+- datos;
+- usuarios;
+- perfiles;
+- permisos;
+- mensajes;
+- valores;
+- campos;
+- botones;
+- navegación;
+- reglas;
+- respuestas;
+- validaciones;
+- resultados;
+- estados;
+- configuraciones.
+
+Cuando falte información:
+
+- generar el CP DRAFT sustentado;
+- no completar el vacío con suposiciones;
+- marcar ALERTA;
+- indicar qué información falta.
+
+---
+
+# 9. ESTRUCTURA FUNCIONAL DEL TEST CASE
+
+Mantener la estructura aprobada:
 
 - ID
-- Work Item Type
 - Title
-- Area Path
-- Assigned To
-- State
+- Product
+- Module
+- Description
+- Expected Result
+- Preconditions
+- Related Use Case
+- Steps
+  - Step #
+  - Action
+  - Expected value
+- Alerts cuando corresponda
 
-El `Test Step` cambia secuencialmente y también cambian `Step Action` y `Step Expected`.
+No agregar campos funcionales nuevos al modelo aprobado.
 
-### Ejemplo
+---
 
-ID | Work Item Type | Title | Test Step | Step Action | Step Expected | Area Path | Assigned To | State
-| | Test Case | CP-AC-AUTO-00001 - Crear cotización | 1 | Ingresar al cotizador | Se muestra el cotizador | [ruta real] | [usuario real] | Design
-| | Test Case | CP-AC-AUTO-00001 - Crear cotización | 2 | Seleccionar Autos Colectivos | Se muestra el módulo | [ruta real] | [usuario real] | Design
+# 10. AZURE IMPORT
 
-## 6. MATRIZ QA
+La salida Azure Import debe utilizar exclusivamente el modelo maestro definido para el proyecto:
 
-La hoja `Matriz QA` debe conservar exactamente las columnas ya aprobadas por el proyecto.
+`TestCaseId`
+`Title`
+`TestStep`
+`StepAction`
+`StepExpected`
+`TestPointId`
+`Configuration`
+`Tester`
+`Outcome`
+`Comment`
 
-No agregar columnas adicionales a la Matriz QA por este ajuste.
+No agregar columnas adicionales a esta hoja.
 
-## 7. VALIDACIÓN FINAL
+Cada Step debe ocupar una fila independiente.
 
-Antes de entregar:
+Ejemplo conceptual:
 
-- Todos los CU tienen mínimo un CP.
+| TestCaseId | Title | TestStep | StepAction | StepExpected |
+|---|---|---:|---|---|
+| CP-AC-AUTO-00001 | ... | 1 | Acción 1 | Resultado 1 |
+| CP-AC-AUTO-00001 | ... | 2 | Acción 2 | Resultado 2 |
+| CP-AC-AUTO-00001 | ... | 3 | Acción 3 | Resultado 3 |
+
+El contenido debe conservar el ID QA del proyecto en `TestCaseId`.
+
+No confundir el ID funcional `CP-AC-...` con el Work Item ID numérico que Azure pueda generar posteriormente.
+
+---
+
+# 11. DATOS ADICIONALES
+
+Si la estructura aprobada del proyecto contempla una hoja separada `Datos Adicionales`, utilizarla para conservar información que no pertenece a las columnas de Azure Import, incluyendo según corresponda:
+
+- Product
+- Module
+- Description
+- Expected Result
+- Preconditions
+- Related Use Case
+- Coverage
+- Alerts
+- información de trazabilidad.
+
+No modificar la hoja Azure Import para introducir estas columnas.
+
+---
+
+# 12. VALIDACIÓN OBLIGATORIA ANTES DE ENTREGAR
+
+Antes de generar la salida final comprobar:
+
+### Cobertura
+
+- Todos los CU identificados tienen al menos un CP.
+- Ningún CU quedó sin cobertura.
+
+### Independencia
+
 - Cada CP tiene exactamente un CU.
-- No existen CP relacionados con varios CU.
-- Producto y Módulo usan la nomenclatura definida cuando corresponda.
-- La hoja Azure Import tiene exactamente los 9 encabezados oficiales.
-- Los CP nuevos tienen ID vacío en la columna Azure `ID`.
-- Cada Step es una fila.
-- Los campos requeridos de Azure se mantienen consistentes.
-- State = `Design`.
+- Ningún CP tiene varios CU.
+- No existen relaciones CP → múltiples funcionalidades.
+
+### Calidad
+
+- Description contextual.
+- Expected Result verificable.
+- Preconditions sustentadas.
+- Steps ejecutables.
+- Action y Expected separados.
+- Sin pasos excesivamente agrupados.
+- Sin escenarios artificiales.
+- Sin duplicados.
+
+### Fuente
+
+- Todo comportamiento está sustentado.
+- No se utilizaron ejemplos históricos para inventar funcionalidad.
+- Alertas registradas cuando falte información.
+
+### Catálogo
+
+Para Autos Colectivos:
+
+`Producto = Cotizadores Web`
+
+`Módulo = Cotizador Autos Colectivos`
+
+### Azure
+
+- Azure Import contiene únicamente las columnas aprobadas.
+- Cada Step ocupa una fila.
+- TestCaseId mantiene el ID CP-AC-...
+- No se agregaron columnas nuevas.
+
+---
+
+# 13. PRINCIPIO FINAL
+
+El agente debe producir casos que parezcan documentados por un QA que conoce el estándar histórico del equipo:
+
+**claros, ejecutables, verificables, suficientemente detallados y trazables, pero sin inventar ni exagerar.**
+
+La calidad NO se mide por cantidad de CP.
+
+Se mide por:
+
+`Cobertura + precisión + trazabilidad + ejecutabilidad + sustentación documental`.
