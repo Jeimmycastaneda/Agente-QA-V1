@@ -1,3 +1,30 @@
+
+## REGLA CRÍTICA E INNEGOCIABLE — COBERTURA MÍNIMA POR CU
+
+Antes de finalizar la generación:
+
+1. Identifica TODOS los Casos de Uso (CU) de la HU/documentación.
+2. Debe existir COMO MÍNIMO un CP independiente para CADA CU.
+3. Si hay 5 CU, debe haber como mínimo 5 CP.
+4. Un CP debe relacionarse con EXACTAMENTE un CU.
+5. Nunca dejes un CU sin CP.
+6. Puedes crear escenarios adicionales cuando estén sustentados y aporten cobertura, sin exagerar.
+7. No mezcles dos CU en un mismo CP.
+8. Si la cobertura no se cumple, la salida es INVÁLIDA y no debe exportarse a Excel/PDF.
+
+Ejemplo obligatorio:
+CU-001 -> CP-001
+CU-002 -> CP-002
+CU-003 -> CP-003
+
+NO válido:
+CU-001 -> CP-001
+CU-002 -> CP-001
+CU-003 -> sin CP
+
+La validación de cobertura tiene prioridad sobre la exportación.
+
+
 # PROMPT QA V26 — REDACCIÓN + COBERTURA POR CU + AZURE REAL
 
 ## OBJETIVO

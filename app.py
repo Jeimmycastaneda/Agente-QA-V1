@@ -18,6 +18,39 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+
+# ===== V28: VALIDACIÓN OBLIGATORIA DE COBERTURA POR CU =====
+def _normalize_cu(value):
+    if value is None:
+        return ""
+    return str(value).strip().upper()
+
+def validate_minimum_cu_coverage(cases, identified_use_cases):
+    """
+    Regla obligatoria:
+    - Cada CU identificado debe tener al menos un CP.
+    - Cada CP debe apuntar a un único CU.
+    Devuelve (ok, missing_cus, invalid_cases).
+    """
+    identified = {_normalize_cu(x) for x in (identified_use_cases or []) if _normalize_cu(x)}
+    covered = set()
+    invalid_cases = []
+
+    for idx, case in enumerate(cases or [], start=1):
+        cu = case.get("related_use_case") or case.get("use_case") or case.get("Requirement / Use Case") or case.get("Related Use Case")
+        if isinstance(cu, (list, tuple, set)):
+            cu_values = [_normalize_cu(x) for x in cu if _normalize_cu(x)]
+        else:
+            cu_values = [_normalize_cu(cu)] if _normalize_cu(cu) else []
+
+        if len(cu_values) != 1:
+            invalid_cases.append(idx)
+        else:
+            covered.add(cu_values[0])
+
+    missing = sorted(identified - covered)
+    return len(missing) == 0 and len(invalid_cases) == 0, missing, invalid_cases
+
 try:
     from google import genai
     from google.genai import types
@@ -1489,3 +1522,20 @@ if result:
         pd.DataFrame(preview_rows),
         use_container_width=True,
     )
+
+
+def require_cu_coverage_before_export(cases, identified_use_cases):
+    ok, missing_cus, invalid_cases = validate_minimum_cu_coverage(
+        cases, identified_use_cases
+    )
+    if not ok:
+        details = []
+        if missing_cus:
+            details.append("CU sin CP: " + ", ".join(missing_cus))
+        if invalid_cases:
+            details.append("CP con relación distinta de 1 CU: " + ", ".join(map(str, invalid_cases)))
+        raise ValueError(
+            "GENERACIÓN BLOQUEADA: cada CU debe tener mínimo un CP. " +
+            " | ".join(details)
+        )
+    return True
