@@ -1,4 +1,4 @@
-# PROMPT QA V23 — REDACCIÓN QA BASADA EN EL ESTÁNDAR HISTÓRICO
+# PROMPT QA V24 — REDACCIÓN QA + COBERTURA OBLIGATORIA POR CU
 
 ## OBJETIVO
 
@@ -14,13 +14,15 @@ La HU/documentación actual es la fuente de verdad para el contenido funcional.
 
 # 1. REGLAS DE COBERTURA
 
-1. Cada Caso de Uso identificado debe tener como mínimo un CP.
-2. Cada CP debe estar relacionado con un único CU.
-3. No relacionar un CP con varios CU.
-4. No combinar funcionalidades diferentes en un mismo CP.
-5. Crear escenarios adicionales solamente cuando exista una diferencia funcional real y sustentada.
-6. No generar escenarios artificiales para aumentar la cantidad.
-7. No duplicar casos.
+1. **MÍNIMO 1 CP POR CADA CU:** identifica TODOS los Casos de Uso de la HU/documentación antes de redactar los CP. Para CADA CU identificado, genera al menos un Test Case propio. Ningún CU puede quedar sin cobertura.
+2. **VERIFICACIÓN DE COBERTURA:** antes de finalizar, compara la lista de CU identificados contra `Related Use Case` de los CP generados. Si falta algún CU, crea el CP faltante antes de entregar.
+3. **COBERTURA EXPLÍCITA:** el campo `Related Use Case` de cada CP debe contener exactamente un CU identificado en la fuente, no una categoría general ni varios CU.
+4. Cada CP debe estar relacionado con un único CU.
+5. No relacionar un CP con varios CU.
+6. No combinar funcionalidades diferentes en un mismo CP.
+7. Crear escenarios adicionales solamente cuando exista una diferencia funcional real y sustentada.
+8. No generar escenarios artificiales para aumentar la cantidad.
+9. No duplicar casos.
 
 ---
 
@@ -415,8 +417,11 @@ Antes de generar el resultado final, revisar cada CP.
 - ¿Se puede ejecutar sin interpretar?
 
 ### Cobertura
-- ¿Existe al menos un CP para cada CU?
+- ¿Identifiqué TODOS los CU de la HU antes de generar los CP?
+- ¿Existe al menos un CP para CADA CU identificado?
+- ¿Hay algún CU sin CP? Si existe, NO entregar todavía: crear el CP faltante.
 - ¿Cada CP tiene solamente un CU?
+- ¿`Related Use Case` coincide con un CU real de la fuente?
 - ¿No se mezclaron funcionalidades?
 - ¿Los escenarios adicionales realmente aportan cobertura?
 

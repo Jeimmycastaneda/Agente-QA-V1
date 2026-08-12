@@ -25,7 +25,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V23-REDACCION"
+APP_VERSION = "V24-REDACCION-COBERTURA-CU"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -518,6 +518,7 @@ def generate_qa_data(
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
         + "\n\n==================== REGLA DE FUENTE ====================\n"
+        "REGLA CRITICA DE COBERTURA: identifica todos los Casos de Uso de la HU y genera como minimo un Test Case independiente por cada CU. Ningun CU puede quedar sin cobertura; cada CP debe tener exactamente un Related Use Case. Verifica la cobertura antes de entregar. "
         "La HU/documentación actual es la única fuente de verdad para el contenido funcional. "
         "No inventes usuarios, perfiles, rutas, URLs, campos, mensajes, permisos, valores, "
         "reglas, estados ni resultados.\n"
