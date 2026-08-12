@@ -1,166 +1,134 @@
-# PROMPT QA — V13
-## COBERTURA OBLIGATORIA POR CASO DE USO — SIN RELACIONES ENTRE FUNCIONALIDADES
+# PROMPT QA — COBERTURA POR CASO DE USO
 
-### OBJETIVO
+## REGLA OBLIGATORIA DE COBERTURA
 
-Analiza exclusivamente la documentación proporcionada y genera Test Cases funcionales DRAFT con trazabilidad completa, sin inventar información.
+Cada Caso de Uso (CU) identificado en la documentación DEBE tener como mínimo un Caso de Prueba (CP) propio.
 
-La regla de cobertura es estricta:
+### Regla estricta
 
-**CADA CASO DE USO IDENTIFICADO DEBE TENER COMO MÍNIMO UN CASO DE PRUEBA PROPIO.**
+**1 Test Case = 1 Caso de Uso.**
 
-### 1. REGLA OBLIGATORIA: UN CU POR CP
+No crear relaciones entre funcionalidades diferentes.
 
-Para cada Caso de Uso (CU) identificado en la documentación:
+Por lo tanto:
 
-- Generar como mínimo un Test Case.
-- Ese Test Case debe estar asociado a UN SOLO Caso de Uso.
-- El campo `Related Use Case` debe contener un único CU.
-- La fila correspondiente de `COVERAGE` debe contener un único CU.
-- No combinar varios CU en un mismo Test Case.
-- No crear relaciones entre funcionalidades diferentes.
+- Cada CP debe estar asociado a un único CU.
+- `Related Use Case` debe contener un único CU.
+- Cada relación registrada en `COVERAGE` debe relacionar un CP con un único CU.
+- No colocar varios CU dentro del mismo Test Case.
+- No agrupar CU diferentes aunque pertenezcan a la misma HU, módulo, pantalla, proceso o flujo.
+- No considerar que mencionar varios CU dentro de Description o Steps equivale a cubrirlos.
 
-### 2. PROHIBICIÓN DE AGRUPAR FUNCIONALIDADES
+### Cobertura mínima
 
-NO está permitido:
+Antes de finalizar la generación:
 
-- Crear un Test Case que cubra simultáneamente CU-001 + CU-002.
-- Colocar varios CU dentro de `Related Use Case`.
-- Crear una fila de `COVERAGE` que relacione un Test Case con varios CU.
-- Agrupar funcionalidades diferentes solo porque pertenezcan a la misma HU, módulo, pantalla, proceso o flujo general.
-- Considerar que una mención de varios CU dentro de Description, Scenario o Steps equivale a cobertura independiente.
+1. Identificar todos los CU sustentados por la documentación.
+2. Generar como mínimo un CP independiente para cada CU.
+3. Verificar que ningún CU quede sin CP.
+4. Verificar que ningún CP esté relacionado con más de un CU.
 
-**Regla:** 1 Test Case → 1 Caso de Uso.
+La cantidad mínima de CP debe corresponder al número de CU identificados.
 
-Si dos CU tienen pasos parecidos, reglas parecidas o aparecen en la misma pantalla, siguen siendo casos independientes si están identificados como CU diferentes.
+## ESCENARIOS ADICIONALES
 
-### 3. COBERTURA MÍNIMA
+Después de garantizar el mínimo de un CP por cada CU, generar CP adicionales únicamente cuando la documentación sustente un comportamiento funcional diferente.
 
-Antes de generar escenarios adicionales:
-
-1. Identificar todos los CU sustentados por la fuente.
-2. Crear mínimo un CP independiente para cada CU.
-3. Verificar que cada CU tenga su CP propio.
-4. Verificar que ningún CP tenga más de un CU asociado.
-
-La cantidad mínima de CP debe ser igual al número de CU identificados, salvo que la documentación no permita identificar un CU con certeza. En ese caso, no inventar: registrar ALERTA y usar únicamente información sustentada.
-
-### 4. ESCENARIOS ADICIONALES, SIN EXAGERAR
-
-Después de garantizar un CP independiente por cada CU, evaluar si ese CU tiene escenarios funcionales adicionales sustentados por la documentación.
-
-Crear CP adicionales para el mismo CU únicamente cuando exista un comportamiento funcional realmente diferente, por ejemplo:
+Se pueden generar escenarios adicionales cuando existan, por ejemplo:
 
 - flujo principal y flujo alternativo documentados;
-- validación diferente;
-- regla de negocio diferente;
-- condición diferente;
-- error documentado;
-- límite documentado;
-- estado diferente;
-- perfil/rol diferente explícitamente definido;
-- criterio de aceptación diferente;
-- resultado esperado diferente;
-- comportamiento funcional distinto claramente sustentado.
+- validaciones diferentes;
+- reglas de negocio diferentes;
+- condiciones diferentes;
+- errores documentados;
+- límites documentados;
+- estados diferentes;
+- perfiles o roles diferentes explícitamente definidos;
+- criterios de aceptación diferentes;
+- resultados esperados diferentes;
+- comportamientos funcionales distintos claramente sustentados.
 
-### 5. CONTROL DE CANTIDAD
+Los CP adicionales de un mismo CU siguen respetando:
 
-No crear casos adicionales solo para aumentar la cantidad.
+**1 CP = 1 CU.**
 
-No usar listas genéricas de técnicas QA para fabricar escenarios que no estén sustentados.
+## NO EXAGERAR
 
-No duplicar casos.
+No generar casos para aumentar artificialmente la cantidad.
 
-No fragmentar un mismo escenario en varios CP si el objetivo, condición, comportamiento y resultado son esencialmente los mismos.
+No crear casos casi idénticos.
 
-La regla es:
+No dividir artificialmente un mismo flujo.
 
-**Mínimo 1 CP independiente por CU + CP adicionales solo cuando aporten cobertura funcional real y estén sustentados.**
+No utilizar técnicas QA genéricas para inventar escenarios que no estén sustentados por la documentación.
 
-### 6. EJEMPLO
+El objetivo es:
 
-Si la documentación identifica:
+**Cobertura completa + escenarios suficientes + cantidad razonable.**
 
-- CU-101 Crear pestaña Ajuste de Tasas
-- CU-102 Validar rangos
-- CU-103 Calcular prima
+No es objetivo generar la mayor cantidad posible de CP.
 
-La salida mínima debe ser:
+## NO AGRUPAR FUNCIONALIDADES
 
-- CP-001 → CU-101
-- CP-002 → CU-102
-- CP-003 → CU-103
+Si existen:
 
-NO:
+- CU-001 Crear funcionalidad
+- CU-002 Validar funcionalidad
+- CU-003 Consultar funcionalidad
 
-- CP-001 → CU-101 + CU-102
-- CP-002 → CU-103
+la salida mínima debe ser:
 
-Si CU-102 tiene además un escenario de error documentado:
+- CP-001 → CU-001
+- CP-002 → CU-002
+- CP-003 → CU-003
 
-- CP-002 → CU-102 — flujo principal
-- CP-004 → CU-102 — error documentado
+Nunca:
 
-Sigue siendo 1 CU por CP.
+- CP-001 → CU-001 + CU-002
+- CP-002 → CU-003
 
-### 7. INFORMACIÓN INSUFICIENTE
+Aunque las funcionalidades estén relacionadas funcionalmente.
 
-Si un CU existe pero la documentación no permite definir completamente el flujo:
+## INFORMACIÓN INSUFICIENTE
 
-- Crear el CP mínimo DRAFT asociado exclusivamente a ese CU.
-- No inventar Steps, datos, mensajes, permisos, campos ni resultados.
-- Marcar cobertura como `Parcial` o `No cubierta`.
-- Crear ALERTA indicando qué información falta.
+Si un CU está documentado pero no existe suficiente información:
 
-### 8. NO INVENCIÓN
+- crear el CP DRAFT mínimo sustentado;
+- asociarlo exclusivamente a ese CU;
+- no inventar pasos, datos, mensajes, permisos, campos o resultados;
+- marcar la cobertura como Parcial o No cubierta;
+- generar ALERTA indicando qué información falta.
 
-Nunca inventar:
+## VALIDACIÓN FINAL
 
-- datos;
-- valores;
-- mensajes;
-- usuarios;
-- perfiles;
-- permisos;
-- campos;
-- navegación;
-- reglas;
-- respuestas del sistema;
-- resultados no documentados.
-
-### 9. VALIDACIÓN OBLIGATORIA ANTES DE ENTREGAR
-
-Verificar:
+Antes de entregar la salida:
 
 - Todos los CU identificados tienen al menos un CP.
-- Cada CP tiene exactamente un CU en `Related Use Case`.
-- Cada fila de `COVERAGE` relaciona un CP con exactamente un CU.
-- No existen relaciones CP → varios CU.
-- No existen funcionalidades agrupadas artificialmente.
-- Los CP adicionales tienen sustento documental.
-- No hay duplicados ni exageración.
+- Cada CP tiene exactamente un CU.
+- Cada fila de COVERAGE tiene exactamente un CU.
+- No existen CP relacionados con varios CU.
+- Los escenarios adicionales tienen sustento documental.
+- No existen duplicados ni casos creados únicamente para aumentar cantidad.
 
-Regla conceptual:
+Reglas conceptuales:
 
-`Para cada CU identificado: COUNT(CP asociados) >= 1`
+`Para cada CU: cantidad de CP asociados >= 1`
 
-y:
+`Para cada CP: cantidad de CU asociados = 1`
 
-`Para cada CP: COUNT(CU asociados) = 1`
+## CONSERVAR
 
-### 10. ESTRUCTURA EXISTENTE
+No modificar:
 
-Mantener sin cambios:
+- estructura TEST_CASES;
+- estructura COVERAGE;
+- ALERTS;
+- IDs;
+- Steps;
+- Excel;
+- PDF;
+- Azure Import;
+- Matriz QA;
+- reglas de NO INVENCIÓN.
 
-- TEST_CASES
-- COVERAGE
-- ALERTS
-- IDs
-- Steps
-- Excel
-- PDF
-- Azure Import
-- Matriz QA
-- reglas de NO INVENCIÓN
-
-Este ajuste modifica únicamente la regla de cobertura y generación de escenarios.
+Este ajuste modifica únicamente el criterio de cobertura y generación de escenarios.

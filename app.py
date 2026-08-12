@@ -10,7 +10,7 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
-from editor_azure_v13 import render_azure_style_editor, delete_test_case
+from editor_azure import render_azure_style_editor, delete_test_case
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
