@@ -663,6 +663,88 @@ def _generate_once(client, model_name, full_prompt):
     )
 
 
+# ============================================================
+# ADDENDUM DE CALIDAD — DETALLE FUNCIONAL DEL CP
+# ============================================================
+DETAILED_QA_ADDENDUM = """
+REGLAS OBLIGATORIAS DE NIVEL DE DETALLE PARA LOS CASOS DE PRUEBA
+
+El Caso de Prueba debe reflejar con alto nivel de fidelidad el Caso de Uso (CU)
+relacionado. NO generes CP básicos, genéricos ni resumidos.
+
+1. TRAZABILIDAD CU -> CP
+- Identifica el CU exacto que sustenta cada CP y usa su contenido completo como
+  fuente principal del caso.
+- Related Use Case debe indicar el ID y, cuando esté disponible, el nombre del CU.
+- Cada CP debe corresponder a EXACTAMENTE un CU.
+- Debe existir como mínimo un CP por cada CU identificado.
+- Si un CU requiere varios escenarios funcionales realmente distintos, puede tener
+  varios CP; no crees CP adicionales solo para separar pasos.
+
+2. DESCRIPCIÓN SUPER DETALLADA
+La Description del CP debe explicar el escenario funcional completo. Incluye,
+cuando exista en la fuente:
+- objetivo y contexto del CU;
+- usuario, perfil o rol involucrado;
+- módulo, opción, pantalla o funcionalidad;
+- condiciones iniciales y precondiciones;
+- datos/campos que deben diligenciarse o consultarse;
+- reglas de negocio y condiciones;
+- estados iniciales/finales;
+- restricciones, límites y validaciones;
+- comportamiento esperado de cada parte relevante del flujo;
+- resultado final que debe obtener el usuario/sistema.
+
+Si para que el CP sea autónomo y ejecutable es necesario incorporar el contenido
+completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
+
+3. PASOS COMPLETOS Y EJECUTABLES
+- Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
+- Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
+  necesario para reproducir el escenario.
+- Cada paso debe ser concreto y verificable: acción + resultado esperado.
+- No agrupes en una sola frase varias acciones importantes si eso hace perder
+  trazabilidad o dificulta la ejecución.
+- No conviertas cada paso en un CP diferente.
+- Un CP puede y debe tener múltiples Steps cuando el CU lo requiera.
+
+4. FIDELIDAD Y NO INVENCIÓN
+- Usa exclusivamente la documentación proporcionada como fuente de verdad.
+- No inventes usuarios, rutas, URLs, botones, mensajes, campos, valores, reglas,
+  permisos, datos o resultados que no estén sustentados.
+- Cuando la fuente no defina un dato necesario, conserva la incertidumbre y genera
+  ALERTA/Validation Required en lugar de inventarlo.
+- Sí puedes reorganizar y redactar para mejorar claridad, pero NO debes perder
+  detalles funcionales del CU.
+
+5. CALIDAD MÍNIMA DEL CP
+Un CP se considera insuficiente si su Description, Preconditions, Expected Result
+ o Steps son tan genéricos que no permiten reconocer qué parte específica del CU
+ se está validando.
+
+Ejemplo de calidad insuficiente:
+"Validar que el sistema permita realizar la cotización."
+
+Ejemplo de intención correcta:
+"Validar el flujo definido en el CU para el perfil indicado, incluyendo el ingreso
+al módulo, selección de la opción correspondiente, diligenciamiento/consulta de
+los datos definidos, aplicación de las reglas y condiciones establecidas, ejecución
+ de la operación y verificación del resultado final especificado por el CU."
+
+El ejemplo anterior solo define el NIVEL DE DETALLE; los datos concretos siempre
+deben provenir de la documentación fuente.
+
+6. EXCEL AZURE — NO CAMBIAR ESTAS REGLAS
+- Un CP debe exportarse como un bloque: una fila de cabecera + todas sus filas de Steps.
+- En la cabecera: ID, Work Item Type, Title, Area Path, IDPadre, Tipo Origen Proyecto,
+  Tiempo Real, Assigned To y State.
+- En las filas de pasos: SOLO Test Step, Step Action y Step Expected.
+- Tipo Origen Proyecto = Proyecto.
+- Area Path = COTIZADORES WEB\\DESARROLLO.
+- IDPadre = vacío.
+- No crear un CP por cada Step.
+"""
+
 def generate_qa_data(
     prompt_text,
     source_content,
@@ -689,6 +771,8 @@ def generate_qa_data(
 
     full_prompt = (
         prompt_text
+        + "\n\n==================== ADDENDUM OBLIGATORIO DE CALIDAD ====================\n"
+        + DETAILED_QA_ADDENDUM
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
         + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
@@ -814,9 +898,9 @@ def create_excel(data, config_key):
 
     Importante:
     - Para CP nuevos, ID queda vacío.
-    - Cada paso es una fila.
-    - ID, Work Item Type, Title, Area Path, Assigned To y State se repiten
-      en cada fila del mismo CP, tal como solicita el importador de Azure.
+    - Cada CP es un bloque: una fila de cabecera seguida por sus pasos.
+    - En las filas de pasos se dejan vacíos los campos de cabecera, igual que en
+      el Excel exportado de Azure Test Plans usado como referencia.
     - El ID funcional CP-AC-... se conserva dentro del Title, no en la columna ID.
     """
     config = EXCEL_CONFIGS[config_key]
@@ -869,11 +953,13 @@ def create_excel(data, config_key):
                 alerts = " | ".join(general_alerts)
 
         # --------------------------------------------------------
-        # AZURE IMPORT
+        # AZURE IMPORT — ESTRUCTURA DEL EXPORT DE AZURE TEST PLANS
         # --------------------------------------------------------
-        # Azure crea un nuevo CP cuando ID está vacío.
-        # Repetimos los campos de cabecera en TODAS las filas del CP.
-        area_path = safe_text(config.get("area_path"))
+        # Un CP = una fila de cabecera + todas sus filas de pasos.
+        # La cabecera contiene ID/Work Item Type/Title y metadatos.
+        # Las filas siguientes contienen SOLO Test Step/Step Action/Step Expected.
+        # Esta estructura evita que Azure interprete cada paso como un nuevo CP.
+        area_path = safe_text(config.get("area_path")) or "COTIZADORES WEB\\DESARROLLO"
         assigned_to = safe_text(config.get("assigned_to"))
         state = "Design"
         work_item_type = "Test Case"
@@ -884,17 +970,32 @@ def create_excel(data, config_key):
                 "Action": "Información insuficiente para definir el paso.",
                 "Expected value": "Validar con el equipo funcional antes de ejecutar.",
             }]
-            comment = "ALERTA: caso sin pasos definidos."
         else:
             steps_for_export = steps
-            comment = ""
 
+        # Fila cabecera: exactamente una por CP.
+        azure_rows.append({
+            "ID": "",
+            "Work Item Type": work_item_type,
+            "Title": title,
+            "Test Step": "",
+            "Step Action": "",
+            "Step Expected": "",
+            "Area Path": area_path,
+            "IDPadre": "",
+            "Tipo Origen Proyecto": "Proyecto",
+            "Tiempo Real": "",
+            "Assigned To": assigned_to,
+            "State": state,
+        })
+
+        # Filas de pasos: solo Step/Action/Expected, igual al modelo exportado de Azure.
         for step_index, step in enumerate(steps_for_export, start=1):
             azure_rows.append({
                 "ID": "",
-                "Work Item Type": work_item_type,
-                "Title": title,
-                "Test Step": step_index,
+                "Work Item Type": "",
+                "Title": "",
+                "Test Step": step.get("Step #", step_index),
                 "Step Action": safe_text(
                     step.get("Action"),
                     "Acción no definida",
@@ -903,12 +1004,12 @@ def create_excel(data, config_key):
                     step.get("Expected value"),
                     "Resultado esperado no definido",
                 ),
-                "Area Path": area_path or "COTIZADORES WEB\\DESARROLLO",
+                "Area Path": "",
                 "IDPadre": "",
-                "Tipo Origen Proyecto": "Proyecto",
+                "Tipo Origen Proyecto": "",
                 "Tiempo Real": "",
-                "Assigned To": assigned_to,
-                "State": state,
+                "Assigned To": "",
+                "State": "",
             })
 
         # --------------------------------------------------------
