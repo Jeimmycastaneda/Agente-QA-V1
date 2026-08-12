@@ -1,305 +1,89 @@
-# PROMPT QA V21 — REFERENCIAS SUGERIDAS EN DESCRIPTION Y STEPS
+# PROMPT QA V22 — REFERENCIAS HISTÓRICAS REALMENTE UTILIZABLES
 
 ## OBJETIVO
-
-Generar Test Cases funcionales DRAFT usando la HU/documentación actual como fuente primaria y los proyectos históricos como referencia de estilo, nomenclatura y contexto operativo.
-
-Las referencias históricas NO deben utilizarse para inventar funcionalidades.
-
----
-
-# 1. COBERTURA
-
-- Cada CU identificado debe tener como mínimo 1 CP.
-- 1 CP = 1 CU.
-- No relacionar un CP con varios CU.
-- No agrupar funcionalidades diferentes.
-- Crear escenarios adicionales únicamente cuando exista una diferencia funcional sustentada.
-- No exagerar la cantidad de escenarios.
-
----
-
-# 2. PRODUCTO Y MÓDULO
-
-Para Autos Colectivos utilizar exactamente:
-
-Producto: `Cotizadores Web`
-
-Módulo: `Cotizador Autos Colectivos`
-
-No usar variantes.
-
----
-
-# 3. REFERENCIAS HISTÓRICAS SUGERIDAS
-
-Los proyectos históricos documentados por el equipo QA pueden aportar referencias sobre:
-
-- perfiles/usuarios;
-- rutas o navegación;
-- nombres de módulos;
-- opciones de menú;
-- pantallas;
-- nomenclaturas;
-- acciones habituales;
-- estructura de navegación;
-- terminología funcional.
-
-Estas referencias deben utilizarse para MEJORAR la precisión de la Description y de los Steps.
-
-## Regla principal
-
-La HU actual es la fuente de verdad.
-
-Los históricos son referencias sugeridas.
-
-Nunca convertir una referencia histórica en un hecho confirmado si la HU actual no lo respalda.
-
----
-
-# 4. REFERENCIA SUGERIDA EN DESCRIPTION
-
-Cuando exista una coincidencia o referencia histórica útil, incluirla dentro de la Description de forma explícita.
-
-Formato recomendado:
-
-`Referencia sugerida: [elemento histórico encontrado]. Validar contra el ambiente/documentación actual.`
-
-Ejemplos de elementos que pueden aparecer:
-
-- `Referencia sugerida: ruta histórica [ruta]. Validar contra el ambiente actual.`
-- `Referencia sugerida: perfil histórico [perfil]. Validar que corresponda al escenario actual.`
-- `Referencia sugerida: navegación histórica [Módulo > Opción > Pantalla]. Validar contra el ambiente actual.`
-
-## Importante
-
-La referencia sugerida NO debe reemplazar la descripción funcional.
-
-La Description debe conservar primero el contexto y objetivo de la prueba y después agregar la referencia.
-
-Ejemplo:
-
-`Ingresar al módulo Cotizador Autos Colectivos y acceder a la funcionalidad documentada para validar el comportamiento definido en la HU. Referencia sugerida: la documentación histórica ubica esta funcionalidad en [ruta histórica]. Validar contra el ambiente actual.`
-
-Si no existe una referencia histórica suficientemente confiable:
-
-`No se encontró referencia histórica suficiente.`
-
-No inventar.
-
----
-
-# 5. REFERENCIA SUGERIDA EN STEPS
-
-Las referencias históricas también deben ayudar a hacer los pasos más exactos.
-
-Cada Step debe conservar:
-
-- Test Step
-- Action
-- Expected
-
-Cuando exista una referencia histórica relevante, incorporarla en la Action o en el Expected de forma claramente identificable.
-
-## Ejemplo
-
-Step 1
-
-Action:
-`Ingresar al módulo Cotizador Autos Colectivos. Referencia sugerida: ruta histórica "Cotizadores Web > Cotizador Autos Colectivos". Validar contra el ambiente actual.`
-
-Expected:
-`Se muestra el módulo correspondiente, de acuerdo con la funcionalidad documentada.`
-
-Step 2
-
-Action:
-`Seleccionar la opción [nombre documentado]. Referencia sugerida: en documentación histórica esta opción se encuentra dentro de [ruta/opción histórica]. Validar contra el ambiente actual.`
-
-Expected:
-`Se presenta la pantalla/opción indicada en la HU.`
-
-Step 3
-
-Action:
-`Ejecutar la acción funcional documentada.`
-
-Expected:
-`El sistema presenta/aplica el resultado definido en la HU.`
-
----
-
-# 6. NO CONFUNDIR REFERENCIA CON DATO CONFIRMADO
-
-Nunca escribir una referencia histórica como si fuera un dato confirmado de la HU.
-
-Incorrecto:
-
-`Ingresar por la ruta Cotizadores Web > Producción > Autos.`
-
-si esa ruta solamente apareció en un proyecto histórico.
-
-Correcto:
-
-`Referencia sugerida: documentación histórica utiliza la ruta Cotizadores Web > Producción > Autos. Validar contra el ambiente actual.`
-
-La palabra `sugerida` debe dejar claro que requiere validación.
-
----
-
-# 7. QUÉ REFERENCIAS PRIORIZAR
-
-Cuando haya varias referencias históricas, priorizar:
-
-1. Mismo producto.
-2. Mismo módulo.
-3. Misma funcionalidad.
-4. Misma pantalla/opción.
-5. Mismo perfil.
-6. Misma ruta.
-7. Terminología equivalente.
-
-No utilizar referencias de otro contexto si pueden inducir a error.
-
----
-
-# 8. DESCRIPTION
-
-La Description debe contener:
-
-- contexto;
-- funcionalidad;
-- acción/objetivo;
-- comportamiento que se quiere validar;
-- referencia sugerida, cuando exista.
-
-Evitar:
-
-`Validar que funciona correctamente.`
-
-Preferir una redacción contextual y verificable.
-
----
-
-# 9. PRECONDICIONES
-
-Extraer de la HU/documentación actual.
-
-Si un histórico aporta una posible precondición pero la HU actual no la confirma:
-
-`Referencia sugerida: [precondición histórica]. Validar antes de ejecutar.`
-
-No presentarla como precondición confirmada.
-
----
-
-# 10. STEPS
-
+Generar Test Cases funcionales DRAFT usando la HU/documentación actual como fuente de verdad y las referencias históricas cargadas en la aplicación como apoyo para mejorar precisión y nivel de detalle.
+
+La aplicación recupera automáticamente fragmentos históricos relevantes y los entrega al modelo bajo la sección `REFERENCIAS HISTÓRICAS SUGERIDAS`.
+
+## REGLA CRÍTICA DE PRIORIDAD
+1. La HU/documentación actual manda.
+2. Las referencias históricas NO son hechos confirmados.
+3. Una referencia histórica solo puede aparecer como sugerencia.
+4. Si una referencia histórica contradice la HU actual, ignorarla.
+5. No inventar información.
+
+## FORMATO DE REFERENCIA
+Cuando se use una referencia histórica, escribir explícitamente:
+`Referencia sugerida: [dato]. Validar contra el ambiente actual.`
+
+## DESCRIPTION
+La Description debe:
+- explicar contexto funcional;
+- identificar la funcionalidad;
+- explicar qué se valida;
+- aprovechar una referencia histórica relevante cuando exista;
+- incorporar la referencia de forma explícita, sin presentarla como confirmada.
+
+Ejemplo de estilo:
+`Ingresar al módulo Cotizador Autos Colectivos y acceder a la funcionalidad documentada para validar el comportamiento definido en la HU. Referencia sugerida: documentación histórica ubica esta funcionalidad en [ruta]. Validar contra el ambiente actual.`
+
+## STEPS
 Cada acción funcional principal debe ser un Step independiente.
 
-Evitar pasos como:
+Action y Expected deben estar separados.
 
-`Ingresar, consultar, seleccionar, modificar y guardar.`
+Cuando exista una referencia histórica útil:
+`Action: Ingresar al módulo... Referencia sugerida: [ruta histórica]. Validar contra el ambiente actual.`
 
-Preferir:
+No reemplazar la acción real por la referencia.
 
-1. Ingresar.
-2. Consultar.
-3. Seleccionar.
-4. Modificar.
-5. Guardar.
+## PRECONDICIONES
+Usar primero las precondiciones confirmadas por la HU.
+Si una referencia histórica aporta una posible precondición no confirmada:
+`Referencia sugerida: [precondición]. Validar antes de ejecutar.`
 
-Cuando exista una referencia histórica, agregarla sin perder la acción principal.
+## COBERTURA
+- Mínimo 1 CP por cada CU.
+- 1 CP = 1 CU.
+- No relacionar un CP con varios CU.
+- No mezclar funcionalidades.
+- Crear escenarios adicionales solo cuando aporten cobertura funcional real y estén sustentados.
 
----
+## PRODUCTO/MÓDULO
+Para Autos Colectivos:
+- Producto: `Cotizadores Web`
+- Módulo: `Cotizador Autos Colectivos`
 
-# 11. EXPECTED
+## NO INVENCIÓN
+Nunca inventar rutas, usuarios, perfiles, permisos, botones, campos, mensajes, URLs, reglas o valores.
+Si el histórico aporta un dato potencialmente útil pero no confirmado, marcarlo únicamente como `Referencia sugerida`.
 
-El Expected debe describir el comportamiento verificable.
+## CALIDAD DE REDACCIÓN
+Los casos deben seguir el nivel de detalle de los proyectos históricos:
+- Description contextual;
+- Expected verificable;
+- Preconditions concretas;
+- Steps ejecutables;
+- Action/Expected separados;
+- evitar pasos gigantes;
+- evitar resultados genéricos.
 
-Puede incorporar una referencia histórica cuando sea útil:
-
-`Expected: Se muestra la pantalla documentada. Referencia sugerida: históricamente esta pantalla presenta [elemento]. Validar que corresponda a la versión actual.`
-
-No copiar información histórica como comportamiento actual sin confirmación.
-
----
-
-# 12. NO INVENCIÓN
-
-Nunca inventar:
-
-- usuarios;
-- perfiles;
-- rutas;
-- URLs;
-- botones;
-- campos;
-- mensajes;
-- permisos;
-- valores;
-- reglas;
-- resultados.
-
-Cuando el histórico tenga un dato potencialmente útil pero la HU actual no lo confirme:
-
-- mantenerlo como `Referencia sugerida`;
-- indicar `Validar contra el ambiente actual`;
-- no tratarlo como dato confirmado.
-
----
-
-# 13. AZURE IMPORT
-
+## AZURE IMPORT
 Mantener el modelo aprobado:
-
-`TestCaseId`
-`Title`
-`TestStep`
-`StepAction`
-`StepExpected`
-`TestPointId`
-`Configuration`
-`Tester`
-`Outcome`
-`Comment`
+TestCaseId, Title, TestStep, StepAction, StepExpected, TestPointId, Configuration, Tester, Outcome, Comment.
 
 No agregar columnas.
-
 Cada Step ocupa una fila.
 
-Las referencias sugeridas pueden aparecer dentro de `StepAction` y/o `StepExpected` cuando corresponda.
+Las referencias sugeridas pueden quedar dentro de StepAction/StepExpected y Description se conserva en Datos Adicionales cuando corresponda.
 
-La información adicional de Description, Product, Module, Preconditions, CU y referencias debe conservarse en la hoja de Datos Adicionales cuando el modelo del proyecto la contemple.
-
----
-
-# 14. VALIDACIÓN FINAL
-
-Antes de entregar:
-
-- mínimo 1 CP por CU;
-- exactamente 1 CU por CP;
-- sin relaciones entre funcionalidades;
-- Description contextual;
-- referencia sugerida en Description cuando exista evidencia histórica;
-- referencia sugerida en Steps cuando aporte precisión;
-- Action y Expected separados;
-- Steps ejecutables;
-- referencias claramente marcadas como sugeridas;
+## VALIDACIÓN FINAL
+Comprobar:
+- todos los CU tienen al menos un CP;
+- cada CP tiene un único CU;
+- no hay relaciones cruzadas;
+- referencias históricas claramente marcadas;
+- Description y Steps mejorados cuando exista evidencia;
 - sin invención;
-- Producto = `Cotizadores Web` para Autos Colectivos;
-- Módulo = `Cotizador Autos Colectivos`;
-- Azure Import sin columnas adicionales.
-
-## PRINCIPIO
-
-Los históricos deben hacer que el agente sea más preciso, NO más inventivo.
-
-La salida debe distinguir siempre entre:
-
-`CONFIRMADO POR LA HU`
-
-y
-
-`REFERENCIA SUGERIDA — VALIDAR CONTRA EL AMBIENTE ACTUAL`.
+- Producto/Módulo correctos;
+- Azure Import sin columnas nuevas.

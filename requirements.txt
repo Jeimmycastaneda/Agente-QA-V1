@@ -1,7 +1,7 @@
 streamlit
 pandas
 openpyxl
+reportlab
 pypdf
 python-docx
-reportlab
-google-genai>=1.0.0
+google-genai

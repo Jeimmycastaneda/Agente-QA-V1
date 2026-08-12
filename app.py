@@ -25,7 +25,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V19-AZURE-XLSX"
+APP_VERSION = "V22-REFERENCIAS-HISTORICAS"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -353,6 +353,105 @@ def extract_docx(uploaded_file):
     return content
 
 
+
+def extract_xlsx(uploaded_file):
+    """Extract visible sheet content from an Excel reference file."""
+    data = uploaded_file.getvalue()
+    sheets = pd.read_excel(io.BytesIO(data), sheet_name=None, dtype=str)
+    parts = []
+    for sheet_name, df in sheets.items():
+        df = df.fillna("")
+        parts.append(f"=== HOJA: {sheet_name} ===")
+        parts.append(df.to_csv(index=False))
+    return "\n".join(parts)
+
+
+def extract_csv(uploaded_file):
+    data = uploaded_file.getvalue()
+    try:
+        df = pd.read_csv(io.BytesIO(data), dtype=str)
+    except Exception:
+        df = pd.read_csv(io.BytesIO(data), dtype=str, encoding="latin-1")
+    return df.fillna("").to_csv(index=False)
+
+
+def extract_reference(uploaded_file):
+    """Extract historical QA reference material."""
+    extension = uploaded_file.name.rsplit(".", 1)[-1].lower()
+    if extension in {"txt", "md"}:
+        return extract_txt(uploaded_file)
+    if extension == "pdf":
+        return extract_pdf(uploaded_file)
+    if extension == "docx":
+        return extract_docx(uploaded_file)
+    if extension in {"xlsx", "xls"}:
+        return extract_xlsx(uploaded_file)
+    if extension == "csv":
+        return extract_csv(uploaded_file)
+    raise ValueError(f"Formato de referencia no soportado: .{extension}")
+
+
+def build_reference_context(source_content, reference_files):
+    """
+    Recupera fragmentos de los proyectos históricos más relevantes.
+    La HU actual sigue siendo la fuente de verdad; los históricos son
+    únicamente referencias sugeridas.
+    """
+    if not reference_files:
+        return ""
+
+    source_terms = set(
+        re.findall(r"[a-záéíóúüñ0-9]{4,}", source_content.lower())
+    )
+    priority_terms = {
+        "cotizadores", "cotizador", "autos", "colectivos",
+        "ruta", "perfil", "usuario", "módulo", "modulo",
+        "navegación", "navegacion", "pantalla", "productos",
+        "coberturas", "azure", "test", "caso", "prueba"
+    }
+    source_terms.update(priority_terms.intersection(source_terms))
+
+    candidates = []
+    for name, content in reference_files:
+        clean = safe_text(content)
+        if not clean:
+            continue
+        # Keep chunks large enough to preserve context but small enough for Gemini.
+        chunks = re.split(r"\n(?=(?:===|##|#|Test Case|CP[-_]))", clean)
+        if len(chunks) == 1:
+            chunks = [clean[i:i+4500] for i in range(0, len(clean), 4500)]
+
+        for chunk in chunks:
+            chunk = chunk.strip()
+            if len(chunk) < 80:
+                continue
+            terms = set(re.findall(r"[a-záéíóúüñ0-9]{4,}", chunk.lower()))
+            score = len(source_terms.intersection(terms))
+            for term in ("cotizadores", "autos", "colectivos", "ruta",
+                         "perfil", "usuario", "navegación", "navegacion"):
+                if term in chunk.lower():
+                    score += 2
+            candidates.append((score, name, chunk[:5000]))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    selected = candidates[:6]
+    if not selected:
+        return ""
+
+    parts = [
+        "==================== REFERENCIAS HISTÓRICAS SUGERIDAS ====================",
+        "Estas referencias provienen de documentación histórica cargada por el usuario.",
+        "NO son la fuente de verdad. Úsalas únicamente para mejorar nomenclatura, rutas, perfiles, navegación y granularidad.",
+        "Toda referencia histórica utilizada en Description o Steps debe identificarse como 'Referencia sugerida' y acompañarse de 'Validar contra el ambiente actual'.",
+        ""
+    ]
+    for score, name, chunk in selected:
+        parts.append(f"--- FUENTE HISTÓRICA: {name} | relevancia={score} ---")
+        parts.append(chunk)
+        parts.append("")
+    return "\n".join(parts)
+
+
 def extract_source(uploaded_file):
     extension = uploaded_file.name.rsplit(".", 1)[-1].lower()
 
@@ -362,6 +461,10 @@ def extract_source(uploaded_file):
         content = extract_pdf(uploaded_file)
     elif extension == "docx":
         content = extract_docx(uploaded_file)
+    elif extension in {"xlsx", "xls"}:
+        content = extract_xlsx(uploaded_file)
+    elif extension == "csv":
+        content = extract_csv(uploaded_file)
     else:
         raise ValueError(f"Formato no soportado: .{extension}")
 
@@ -469,6 +572,7 @@ def generate_qa_data(
     temperature=0.1,
     max_retries=2,
     initial_wait=10,
+    reference_context="",
 ):
     if genai is None:
         raise RuntimeError("No está instalada la librería google-genai.")
@@ -487,9 +591,14 @@ def generate_qa_data(
 
     full_prompt = (
         prompt_text
+        + ("\n\n" + reference_context if reference_context else "")
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
-        + "\n\n==================== REGLA DE SALIDA ====================\n"
+        + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
+        "La HU/documentación actual es la fuente de verdad. Las referencias históricas son "
+        "solo sugerencias. Si una referencia histórica contradice o no está confirmada por "
+        "la fuente actual, NO la conviertas en un dato confirmado.\n"
+        "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
     )
@@ -1165,17 +1274,62 @@ with st.sidebar:
 st.subheader("📁 Carga de Documento")
 
 st.info(
-    "Formatos soportados: TXT, MD, PDF, DOCX. "
+    "Formatos de HU: TXT, MD, PDF, DOCX, XLSX/CSV. "
     "Para PDF escaneado se requiere OCR; esta versión no inventa "
     "texto que no pueda extraer."
 )
 
 uploaded = st.file_uploader(
     "Arrastra o selecciona un documento",
-    type=["txt", "md", "pdf", "docx"],
+    type=["txt", "md", "pdf", "docx", "xlsx", "xls", "csv"],
 )
 
 source_text = st.session_state.source_content
+
+# ============================================================
+# REFERENCIAS HISTÓRICAS
+# ============================================================
+if "reference_files" not in st.session_state:
+    st.session_state.reference_files = []
+
+st.subheader("📚 Referencias históricas QA")
+st.caption(
+    "Carga aquí Excel/PDF/DOCX/TXT de proyectos ya documentados. "
+    "El agente los usará solo como referencia sugerida para mejorar "
+    "rutas, perfiles, navegación, nomenclatura y nivel de detalle."
+)
+
+reference_uploads = st.file_uploader(
+    "Proyectos históricos / casos de prueba de referencia",
+    type=["xlsx", "xls", "csv", "pdf", "docx", "txt", "md"],
+    accept_multiple_files=True,
+    key="reference_uploader",
+)
+
+if reference_uploads:
+    loaded_names = {name for name, _ in st.session_state.reference_files}
+    for ref_file in reference_uploads:
+        if ref_file.name in loaded_names:
+            continue
+        try:
+            ref_text = extract_reference(ref_file)
+            if ref_text.strip():
+                st.session_state.reference_files.append((ref_file.name, ref_text))
+        except Exception as exc:
+            st.warning(f"No se pudo leer la referencia {ref_file.name}: {exc}")
+
+if st.session_state.reference_files:
+    st.success(
+        f"✅ {len(st.session_state.reference_files)} referencia(s) histórica(s) disponibles."
+    )
+    with st.expander("Ver referencias cargadas"):
+        for name, content in st.session_state.reference_files:
+            st.write(f"• {name} — {len(content):,} caracteres")
+
+reference_context = build_reference_context(
+    source_text,
+    st.session_state.reference_files,
+)
 
 if uploaded:
     # Procesar solo cuando cambia el archivo.
@@ -1248,6 +1402,7 @@ if st.button(
                 0.0,
                 int(max_retries),
                 int(wait_time),
+                reference_context,
             )
 
         st.session_state.result_json = result
