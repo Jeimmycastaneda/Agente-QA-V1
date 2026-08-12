@@ -10,7 +10,7 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
-from editor_azure import render_azure_style_editor
+from editor_azure_v13 import render_azure_style_editor, delete_test_case
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -25,7 +25,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V17"
+APP_VERSION = "V18-CU-IND-DELETE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1244,12 +1244,13 @@ if result:
     c3.metric("Cobertura", len(result.get("COVERAGE", [])))
 
     # ========================================================
-    # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE DEVOPS
+    # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
+    # V13: un CU por Test Case + eliminar CP
     # ========================================================
     st.subheader("✏️ Editar caso de prueba")
     st.caption(
-        "Revisa y ajusta el caso generado antes de descargar el Excel o PDF. "
-        "El ID se conserva para mantener la trazabilidad."
+        "Revisa y ajusta el caso antes de descargar Excel/PDF. "
+        "Cada Test Case debe conservar un único Caso de Uso relacionado."
     )
 
     case_options = []
@@ -1258,42 +1259,71 @@ if result:
         case_title = build_case_title(tc, case_id)
         case_options.append(f"{case_id} — {case_title[:100]}")
 
-    selected_case_label = st.selectbox(
-        "Selecciona el caso que deseas editar",
-        case_options,
-        key="qa_editor_selected_case",
-    )
-
-    selected_index = case_options.index(selected_case_label)
-    selected_case = result["TEST_CASES"][selected_index]
-    selected_case_id = safe_text(
-        selected_case.get("ID"),
-        f"CASO-{selected_index + 1:05d}",
-    )
-
-    st.markdown(f"### {selected_case_id}")
-    st.info(
-        "La edición está enfocada en Description y Steps, con una experiencia "
-        "estructurada similar a Azure DevOps. El ID no se puede modificar."
-    )
-
-    save_case = render_azure_style_editor(selected_case, selected_index)
-
-    if save_case:
-        st.session_state.excel_data = create_excel(
-            result,
-            selected_config,
+    if case_options:
+        selected_case_label = st.selectbox(
+            "Selecciona el caso que deseas editar",
+            case_options,
+            key="qa_editor_selected_case",
         )
-        st.session_state.pdf_data = create_pdf(
-            result,
-            selected_config,
-            st.session_state.get("source_name", ""),
+        selected_index = case_options.index(selected_case_label)
+        selected_case = result["TEST_CASES"][selected_index]
+        selected_case_id = safe_text(
+            selected_case.get("ID"),
+            f"CASO-{selected_index + 1:05d}",
         )
-        st.success(
-            f"✅ {selected_case_id} actualizado. "
-            "Excel y PDF regenerados con los cambios."
+
+        st.markdown(f"### {selected_case_id}")
+        st.info(
+            "El ID no se puede modificar. La relación funcional del caso "
+            "debe corresponder a un solo Caso de Uso."
         )
-        st.rerun()
+
+        editor_result = render_azure_style_editor(selected_case, selected_index)
+
+        if editor_result == "saved":
+            st.session_state.excel_data = create_excel(result, selected_config)
+            st.session_state.pdf_data = create_pdf(
+                result,
+                selected_config,
+                st.session_state.get("source_name", ""),
+            )
+            st.success(
+                f"✅ {selected_case_id} actualizado. "
+                "Excel y PDF regenerados."
+            )
+            st.rerun()
+
+        st.divider()
+        st.markdown("### 🗑️ Eliminar caso de prueba")
+
+        st.warning(
+            "Esta acción elimina el Test Case seleccionado de la generación actual "
+            "y también elimina su relación en COVERAGE. No elimina otros casos."
+        )
+
+        confirm_delete = st.checkbox(
+            f"Confirmo que quiero eliminar {selected_case_id}",
+            key=f"v13_confirm_delete_{selected_index}",
+        )
+
+        if st.button(
+            "🗑️ Eliminar CP seleccionado",
+            type="secondary",
+            disabled=not confirm_delete,
+            key=f"v13_delete_cp_{selected_index}",
+        ):
+            deleted_id = selected_case_id
+            if delete_test_case(result, selected_index):
+                st.session_state.excel_data = create_excel(result, selected_config)
+                st.session_state.pdf_data = create_pdf(
+                    result,
+                    selected_config,
+                    st.session_state.get("source_name", ""),
+                )
+                st.success(f"✅ {deleted_id} eliminado.")
+                st.rerun()
+    else:
+        st.info("No hay Test Cases para editar.")
 
     st.download_button(
         "📊 Descargar Excel",

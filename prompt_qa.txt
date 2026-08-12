@@ -1,172 +1,166 @@
-# PROMPT QA — AJUSTE V12
-## COBERTURA POR CASO DE USO + ESCENARIOS CONTROLADOS
+# PROMPT QA — V13
+## COBERTURA OBLIGATORIA POR CASO DE USO — SIN RELACIONES ENTRE FUNCIONALIDADES
 
-### 1. OBJETIVO
+### OBJETIVO
 
-Analiza la documentación proporcionada y genera Test Cases funcionales DRAFT, manteniendo las reglas QA, estructura de salida, trazabilidad y no invención definidas en este prompt.
+Analiza exclusivamente la documentación proporcionada y genera Test Cases funcionales DRAFT con trazabilidad completa, sin inventar información.
 
-La prioridad es:
+La regla de cobertura es estricta:
 
-1. Identificar todos los Casos de Uso (CU) sustentados por la documentación.
-2. Garantizar como mínimo un Test Case por cada CU identificado.
-3. A partir de ese mínimo, generar escenarios adicionales cuando exista evidencia documental suficiente de comportamientos funcionales diferentes.
-4. Evitar tanto la generación insuficiente como la generación exagerada o artificial.
+**CADA CASO DE USO IDENTIFICADO DEBE TENER COMO MÍNIMO UN CASO DE PRUEBA PROPIO.**
 
-### 2. REGLA OBLIGATORIA DE COBERTURA
+### 1. REGLA OBLIGATORIA: UN CU POR CP
 
-**Cada Caso de Uso identificado explícitamente en la documentación DEBE tener como mínimo un Test Case asociado.**
+Para cada Caso de Uso (CU) identificado en la documentación:
 
-Esto significa:
+- Generar como mínimo un Test Case.
+- Ese Test Case debe estar asociado a UN SOLO Caso de Uso.
+- El campo `Related Use Case` debe contener un único CU.
+- La fila correspondiente de `COVERAGE` debe contener un único CU.
+- No combinar varios CU en un mismo Test Case.
+- No crear relaciones entre funcionalidades diferentes.
 
-- Ningún CU identificado puede quedar sin cobertura.
-- El campo `Related Use Case` debe identificar claramente el CU cubierto.
-- `COVERAGE` debe registrar individualmente cada CU y su relación con uno o más Test Cases.
-- No es suficiente mencionar un CU dentro de Description, Scenario o Steps.
-- Si un mismo Test Case cubre varios CU, solo hacerlo cuando exista una relación funcional directa y documentada.
-- Aunque un Test Case cubra varios CU, cada CU debe aparecer individualmente en `COVERAGE`.
+### 2. PROHIBICIÓN DE AGRUPAR FUNCIONALIDADES
 
-### 3. CU CON INFORMACIÓN INSUFICIENTE
+NO está permitido:
 
-Si un CU está documentado pero no existe información suficiente para construir una prueba completamente ejecutable:
+- Crear un Test Case que cubra simultáneamente CU-001 + CU-002.
+- Colocar varios CU dentro de `Related Use Case`.
+- Crear una fila de `COVERAGE` que relacione un Test Case con varios CU.
+- Agrupar funcionalidades diferentes solo porque pertenezcan a la misma HU, módulo, pantalla, proceso o flujo general.
+- Considerar que una mención de varios CU dentro de Description, Scenario o Steps equivale a cobertura independiente.
 
-- No inventar información.
-- Crear el Test Case DRAFT mínimo sustentado por la documentación.
-- Asociarlo explícitamente al CU.
-- Marcar la cobertura como `Parcial` o `No cubierta`, según corresponda.
-- Generar una ALERTA indicando exactamente qué información falta.
+**Regla:** 1 Test Case → 1 Caso de Uso.
+
+Si dos CU tienen pasos parecidos, reglas parecidas o aparecen en la misma pantalla, siguen siendo casos independientes si están identificados como CU diferentes.
+
+### 3. COBERTURA MÍNIMA
+
+Antes de generar escenarios adicionales:
+
+1. Identificar todos los CU sustentados por la fuente.
+2. Crear mínimo un CP independiente para cada CU.
+3. Verificar que cada CU tenga su CP propio.
+4. Verificar que ningún CP tenga más de un CU asociado.
+
+La cantidad mínima de CP debe ser igual al número de CU identificados, salvo que la documentación no permita identificar un CU con certeza. En ese caso, no inventar: registrar ALERTA y usar únicamente información sustentada.
+
+### 4. ESCENARIOS ADICIONALES, SIN EXAGERAR
+
+Después de garantizar un CP independiente por cada CU, evaluar si ese CU tiene escenarios funcionales adicionales sustentados por la documentación.
+
+Crear CP adicionales para el mismo CU únicamente cuando exista un comportamiento funcional realmente diferente, por ejemplo:
+
+- flujo principal y flujo alternativo documentados;
+- validación diferente;
+- regla de negocio diferente;
+- condición diferente;
+- error documentado;
+- límite documentado;
+- estado diferente;
+- perfil/rol diferente explícitamente definido;
+- criterio de aceptación diferente;
+- resultado esperado diferente;
+- comportamiento funcional distinto claramente sustentado.
+
+### 5. CONTROL DE CANTIDAD
+
+No crear casos adicionales solo para aumentar la cantidad.
+
+No usar listas genéricas de técnicas QA para fabricar escenarios que no estén sustentados.
+
+No duplicar casos.
+
+No fragmentar un mismo escenario en varios CP si el objetivo, condición, comportamiento y resultado son esencialmente los mismos.
+
+La regla es:
+
+**Mínimo 1 CP independiente por CU + CP adicionales solo cuando aporten cobertura funcional real y estén sustentados.**
+
+### 6. EJEMPLO
+
+Si la documentación identifica:
+
+- CU-101 Crear pestaña Ajuste de Tasas
+- CU-102 Validar rangos
+- CU-103 Calcular prima
+
+La salida mínima debe ser:
+
+- CP-001 → CU-101
+- CP-002 → CU-102
+- CP-003 → CU-103
+
+NO:
+
+- CP-001 → CU-101 + CU-102
+- CP-002 → CU-103
+
+Si CU-102 tiene además un escenario de error documentado:
+
+- CP-002 → CU-102 — flujo principal
+- CP-004 → CU-102 — error documentado
+
+Sigue siendo 1 CU por CP.
+
+### 7. INFORMACIÓN INSUFICIENTE
+
+Si un CU existe pero la documentación no permite definir completamente el flujo:
+
+- Crear el CP mínimo DRAFT asociado exclusivamente a ese CU.
+- No inventar Steps, datos, mensajes, permisos, campos ni resultados.
+- Marcar cobertura como `Parcial` o `No cubierta`.
+- Crear ALERTA indicando qué información falta.
+
+### 8. NO INVENCIÓN
 
 Nunca inventar:
-- campos;
+
 - datos;
-- mensajes;
-- permisos;
-- perfiles;
 - valores;
-- reglas de negocio;
+- mensajes;
+- usuarios;
+- perfiles;
+- permisos;
+- campos;
 - navegación;
-- resultados;
-- comportamientos no documentados.
-
-### 4. GENERACIÓN DE ESCENARIOS
-
-Después de garantizar el mínimo de un Test Case por cada CU, analiza si la documentación contiene escenarios funcionales adicionales.
-
-Genera escenarios adicionales cuando estén explícitamente documentados o puedan derivarse directamente de información verificable de la fuente, por ejemplo:
-
-- flujo principal;
-- flujo alternativo;
-- condiciones alternativas;
-- validaciones;
-- errores documentados;
-- límites documentados;
-- reglas de negocio diferentes;
-- perfiles o usuarios diferentes definidos;
-- estados diferentes;
-- criterios de aceptación diferentes;
-- resultados esperados diferentes;
-- dependencias funcionales que produzcan comportamientos verificables distintos.
-
-### 5. CANTIDAD CONTROLADA
-
-**No generar Test Cases únicamente para aumentar la cantidad.**
-
-El objetivo NO es generar el mayor número posible de casos.
-
-El objetivo es generar una cantidad:
-
-- suficiente para cubrir todos los CU;
-- suficiente para cubrir los escenarios funcionales realmente sustentados;
-- razonable;
-- trazable;
-- ejecutable;
-- sin fragmentación innecesaria.
-
-Evitar dos extremos:
-
-**Insuficiencia**
-- generar solo un caso cuando la documentación evidencia varios comportamientos funcionales diferentes.
-
-**Exageración**
-- crear múltiples casos casi idénticos;
-- dividir artificialmente un mismo flujo;
-- crear escenarios por técnicas QA genéricas que no estén sustentadas;
-- crear casos únicamente porque una condición podría existir en teoría.
-
-### 6. REGLA PARA DECIDIR SI CREAR UN ESCENARIO ADICIONAL
-
-Antes de crear un escenario adicional, comprobar:
-
-1. ¿La documentación menciona o permite derivar directamente este comportamiento?
-2. ¿Tiene una acción, condición, regla o resultado diferente?
-3. ¿Aporta cobertura funcional real?
-4. ¿Puede trazarse a un CU, criterio o requisito?
-5. ¿Evita duplicar otro Test Case?
-
-Si la respuesta es mayoritariamente NO, no crear el escenario.
-
-### 7. NO FRAGMENTAR
-
-No dividir un mismo flujo en varios Test Cases si:
-
-- tienen el mismo objetivo;
-- las mismas precondiciones;
-- las mismas reglas;
-- el mismo resultado esperado;
-- y pueden validarse coherentemente en una única ejecución.
-
-### 8. NO AGRUPAR EN EXCESO
-
-Generar Test Cases independientes cuando existan diferencias funcionales reales en:
-
-- objetivo;
 - reglas;
-- condiciones;
-- perfil;
-- estado;
-- datos documentados;
-- resultado esperado;
-- comportamiento del sistema.
+- respuestas del sistema;
+- resultados no documentados.
 
-### 9. VALIDACIÓN ANTES DE FINALIZAR
+### 9. VALIDACIÓN OBLIGATORIA ANTES DE ENTREGAR
 
-Antes de entregar la salida final, realizar esta comprobación:
+Verificar:
 
-**Paso 1:** listar mentalmente todos los CU identificados.
+- Todos los CU identificados tienen al menos un CP.
+- Cada CP tiene exactamente un CU en `Related Use Case`.
+- Cada fila de `COVERAGE` relaciona un CP con exactamente un CU.
+- No existen relaciones CP → varios CU.
+- No existen funcionalidades agrupadas artificialmente.
+- Los CP adicionales tienen sustento documental.
+- No hay duplicados ni exageración.
 
-**Paso 2:** comprobar que cada CU tenga al menos un Test Case.
+Regla conceptual:
 
-**Paso 3:** comprobar que cada CU aparezca individualmente en `COVERAGE`.
+`Para cada CU identificado: COUNT(CP asociados) >= 1`
 
-**Paso 4:** buscar escenarios adicionales sustentados por la documentación.
+y:
 
-**Paso 5:** incorporar los escenarios adicionales que aporten cobertura real.
+`Para cada CP: COUNT(CU asociados) = 1`
 
-**Paso 6:** eliminar duplicados, fragmentaciones innecesarias y casos creados sin evidencia.
+### 10. ESTRUCTURA EXISTENTE
 
-**Paso 7:** comprobar nuevamente que ningún CU quedó sin cobertura.
+Mantener sin cambios:
 
-### 10. PRINCIPIO FINAL
-
-La cantidad de Test Cases debe responder a esta regla:
-
-> **Mínimo 1 Test Case por cada Caso de Uso + escenarios adicionales realmente sustentados por la documentación, sin inventar y sin exagerar.**
-
-La cobertura completa tiene prioridad sobre la cantidad.
-
-La calidad, trazabilidad y ejecutabilidad tienen prioridad sobre la cantidad.
-
-### 11. CONSISTENCIA DE SALIDA
-
-Mantener sin cambios las estructuras y reglas aprobadas para:
-
-- `TEST_CASES`
-- `COVERAGE`
+- TEST_CASES
+- COVERAGE
+- ALERTS
+- IDs
+- Steps
 - Excel
 - PDF
 - Azure Import
 - Matriz QA
-- IDs
-- Steps
-- NO INVENCIÓN
+- reglas de NO INVENCIÓN
 
-Este ajuste modifica únicamente el criterio de cobertura y cantidad de escenarios.
+Este ajuste modifica únicamente la regla de cobertura y generación de escenarios.
