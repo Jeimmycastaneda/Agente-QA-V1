@@ -27,6 +27,9 @@ def _normalize_cu(value):
 
 
 def _extract_related_cu(tc):
+    """Extrae un único CU desde Related Use Case, aceptando:
+    CU-324, CU-324 - Nombre, CU-324: Nombre, etc.
+    """
     value = (
         tc.get("Related Use Case")
         or tc.get("related_use_case")
@@ -36,20 +39,20 @@ def _extract_related_cu(tc):
         or ""
     )
     if isinstance(value, list):
-        res = []
-        for item in value:
-            if isinstance(item, dict):
-                res.append(str(item.get("ID") or item.get("id") or item.get("Name") or "").strip())
-            else:
-                res.append(str(item).strip())
-        return [x for x in res if x]
+        raw_parts = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw_parts = [x.strip() for x in re.split(r"[;\n|]", str(value)) if x.strip()]
 
-    if isinstance(value, dict):
-        val = str(value.get("ID") or value.get("id") or value.get("Name") or "").strip()
-        return [val] if val else []
-
-    parts = [x.strip() for x in re.split(r"[;\n|]", str(value)) if x.strip()]
-    return parts
+    results = []
+    for part in raw_parts:
+        # El ID del CU es la referencia trazable. Acepta CU-324 y variantes
+        # con separadores/nombre después del ID.
+        match = re.search(r"\b(CU[-_ ]?\d+)\b", part, flags=re.IGNORECASE)
+        if match:
+            results.append(match.group(1).upper().replace("_", "-").replace(" ", "-"))
+        else:
+            results.append(part)
+    return results
 
 
 def calculate_cu_coverage(cases, identified_use_cases):
@@ -69,9 +72,7 @@ def calculate_cu_coverage(cases, identified_use_cases):
             cid = str(cu).strip()
             name = cid
         if cid:
-            norm_cid = _normalize_cu(cid)
-            norm_name = _normalize_cu(name)
-            cu_map[norm_cid] = {"id": cid, "name": name or cid, "norm_name": norm_name}
+            cu_map[_normalize_cu(cid)] = {"id": cid, "name": name or cid}
 
     covered = {}
     cp_without_cu = []
@@ -91,7 +92,7 @@ def calculate_cu_coverage(cases, identified_use_cases):
         rel = _normalize_cu(relations[0])
         matched = None
         for cu_key, cu_info in cu_map.items():
-            if rel == cu_key or rel == cu_info["norm_name"] or rel in cu_info["norm_name"] or cu_key in rel:
+            if rel == cu_key or rel == _normalize_cu(cu_info["name"]):
                 matched = cu_key
                 break
 
@@ -202,7 +203,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V30-AZURE-CU-COVERAGE"
+APP_VERSION = "V31-AZURE-CU-COVERAGE-GEMINI-FALLBACK"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -212,6 +213,8 @@ FALLBACK_MODELS = [
 # ============================================================
 # COLUMNAS APROBADAS — NO AGREGAR NI CAMBIAR TÍTULOS
 # ============================================================
+# Columnas EXACTAS requeridas por Azure DevOps Test Plans para importación XLSX.
+# Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP y establece Tipo Origen Proyecto = Proyecto.
 AZURE_COLUMNS = [
     "ID", "Work Item Type", "Title", "Test Step", "Step Action",
     "Step Expected", "Area Path", "IDPadre", "Tipo Origen Proyecto",
@@ -411,9 +414,19 @@ def module_token(module, title="", scenario=""):
 
 
 def build_case_title(tc, case_id):
+    """
+    V12: garantiza que Title sea un título funcional y no el CP ID.
+    Prioridad:
+      1) Title generado por el modelo si no es solo el ID.
+      2) Scenario
+      3) Description
+      4) Related Use Case
+      5) fallback controlado.
+    """
     raw_title = safe_text(tc.get("Title"))
     normalized_title = re.sub(r"\s+", " ", raw_title).strip()
 
+    # Un título igual al ID no es un título funcional.
     if (
         not normalized_title
         or normalized_title.upper() == case_id.upper()
@@ -487,7 +500,8 @@ def extract_pdf(uploaded_file):
         from pypdf import PdfReader
     except ImportError as exc:
         raise RuntimeError(
-            "La dependencia 'pypdf' no está disponible en el entorno."
+            "La dependencia 'pypdf' no está disponible en el entorno. "
+            "Verifica requirements.txt y vuelve a desplegar la aplicación."
         ) from exc
 
     reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
@@ -499,7 +513,8 @@ def extract_pdf(uploaded_file):
     content = "\n\n".join(pages).strip()
     if not content:
         raise ValueError(
-            "El PDF se abrió correctamente, pero no contiene texto extraíble."
+            "El PDF se abrió correctamente, pero no contiene texto extraíble. "
+            "Si es un PDF escaneado, esta versión requiere OCR."
         )
     return content
 
@@ -509,7 +524,8 @@ def extract_docx(uploaded_file):
         from docx import Document
     except ImportError as exc:
         raise RuntimeError(
-            "La dependencia 'python-docx' no está disponible."
+            "La dependencia 'python-docx' no está disponible. "
+            "Verifica requirements.txt y vuelve a desplegar la aplicación."
         ) from exc
 
     doc = Document(io.BytesIO(uploaded_file.getvalue()))
@@ -525,7 +541,9 @@ def extract_docx(uploaded_file):
     return content
 
 
+
 def extract_xlsx(uploaded_file):
+    """Extract visible sheet content from an Excel reference file."""
     data = uploaded_file.getvalue()
     sheets = pd.read_excel(io.BytesIO(data), sheet_name=None, dtype=str)
     parts = []
@@ -568,7 +586,7 @@ def extract_source(uploaded_file):
 
 
 # ============================================================
-# PROMPT EXISTENTE
+# PROMPT EXISTENTE — SE CONSERVA SIN CAMBIOS
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_prompt():
@@ -625,13 +643,27 @@ def validate_qa_structure(data):
 
     return data
 
+def _is_gemini_3x(model_name):
+    return safe_text(model_name).lower().startswith(("gemini-3.", "gemini-3"))
+
 
 def _extract_error_detail(exc):
     raw = str(exc)
+    # Keep the useful API message but avoid dumping huge exception payloads.
     return raw[:1800]
 
 
 def _generate_once(client, model_name, full_prompt):
+    """
+    V10:
+    - Gemini 3.x: no temperature/top_p/top_k.
+    - Uses structured JSON output.
+    - Limits output to 32K tokens for stability.
+    """
+    # google-genai actual Python SDK format:
+    # response_mime_type + response_schema.
+    # Do NOT use response_format here; that shape is rejected by
+    # GenerateContentConfig in the installed SDK.
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=SCHEMA,
@@ -645,6 +677,9 @@ def _generate_once(client, model_name, full_prompt):
     )
 
 
+# ============================================================
+# ADDENDUM DE CALIDAD — DETALLE FUNCIONAL DEL CP
+# ============================================================
 DETAILED_QA_ADDENDUM = """
 REGLAS OBLIGATORIAS DE NIVEL DE DETALLE PARA LOS CASOS DE PRUEBA
 
@@ -654,14 +689,15 @@ relacionado. NO generes CP básicos, genéricos ni resumidos.
 1. TRAZABILIDAD CU -> CP
 - Identifica el CU exacto que sustenta cada CP y usa su contenido completo como
   fuente principal del caso.
-- Related Use Case debe indicar obligatoriamente el ID exacto asignado en USE_CASES.
+- Related Use Case debe indicar el ID y, cuando esté disponible, el nombre del CU.
 - Cada CP debe corresponder a EXACTAMENTE un CU.
 - Debe existir como mínimo un CP por cada CU identificado.
 - Si un CU requiere varios escenarios funcionales realmente distintos, puede tener
-  varios CP.
+  varios CP; no crees CP adicionales solo para separar pasos.
 
 2. DESCRIPCIÓN SUPER DETALLADA
-La Description del CP debe explicar el escenario funcional completo. Incluye:
+La Description del CP debe explicar el escenario funcional completo. Incluye,
+cuando exista en la fuente:
 - objetivo y contexto del CU;
 - usuario, perfil o rol involucrado;
 - módulo, opción, pantalla o funcionalidad;
@@ -673,23 +709,89 @@ La Description del CP debe explicar el escenario funcional completo. Incluye:
 - comportamiento esperado de cada parte relevante del flujo;
 - resultado final que debe obtener el usuario/sistema.
 
+Si para que el CP sea autónomo y ejecutable es necesario incorporar el contenido
+completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
+
 3. PASOS COMPLETOS Y EJECUTABLES
 - Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
 - Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
   necesario para reproducir el escenario.
 - Cada paso debe ser concreto y verificable: acción + resultado esperado.
+- No agrupes en una sola frase varias acciones importantes si eso hace perder
+  trazabilidad o dificulta la ejecución.
+- No conviertas cada paso en un CP diferente.
+- Un CP puede y debe tener múltiples Steps cuando el CU lo requiera.
 
 4. FIDELIDAD Y NO INVENCIÓN
 - Usa exclusivamente la documentación proporcionada como fuente de verdad.
-- No inventes usuarios, rutas, URLs, botones, mensajes, campos, valores, reglas.
+- No inventes usuarios, rutas, URLs, botones, mensajes, campos, valores, reglas,
+  permisos, datos o resultados que no estén sustentados.
+- Cuando la fuente no defina un dato necesario, conserva la incertidumbre y genera
+  ALERTA/Validation Required en lugar de inventarlo.
+- Sí puedes reorganizar y redactar para mejorar claridad, pero NO debes perder
+  detalles funcionales del CU.
 
-5. EXCEL AZURE — NO CAMBIAR ESTAS REGLAS
+5. CALIDAD MÍNIMA DEL CP
+Un CP se considera insuficiente si su Description, Preconditions, Expected Result
+ o Steps son tan genéricos que no permiten reconocer qué parte específica del CU
+ se está validando.
+
+Ejemplo de calidad insuficiente:
+"Validar que el sistema permita realizar la cotización."
+
+Ejemplo de intención correcta:
+"Validar el flujo definido en el CU para el perfil indicado, incluyendo el ingreso
+al módulo, selección de la opción correspondiente, diligenciamiento/consulta de
+los datos definidos, aplicación de las reglas y condiciones establecidas, ejecución
+ de la operación y verificación del resultado final especificado por el CU."
+
+El ejemplo anterior solo define el NIVEL DE DETALLE; los datos concretos siempre
+deben provenir de la documentación fuente.
+
+6. ESTIMADOS CONTROLADOS DE RUTAS Y OPCIONES DE MENÚ
+Cuando el CU no indique de forma explícita la ruta de navegación, menú,
+pantalla u opción exacta, se permite complementar el CP con un estimado
+CONTROLADO si existe evidencia suficiente en el CU/documentación para
+inferir razonablemente la navegación.
+
+REGLAS PARA LOS ESTIMADOS:
+- Los estimados deben aparecer tanto en la DESCRIPTION como en los STEPS
+  cuando ayuden a hacer el caso ejecutable.
+- En DESCRIPTION usar la etiqueta "Ruta estimada:" o "Navegación sugerida:".
+- En STEPS usar la etiqueta "(Ruta estimada)" o "(Navegación sugerida)".
+- El estimado debe construirse únicamente a partir de módulos, funcionalidades,
+  pantallas u opciones que sí aparezcan en la documentación.
+- Nunca presentar una ruta estimada como si fuera una ruta confirmada.
+- Toda ruta estimada debe generar una alerta/Validation Required para validar
+  la navegación exacta con el equipo funcional.
+- NO inventar nombres específicos de botones, URLs, IDs, pantallas o menús si
+  no tienen sustento en la documentación.
+- Si no existe evidencia suficiente para estimar la ruta, indicar en el Step:
+  "Navegar hasta la funcionalidad indicada en el CU. Ruta exacta no definida
+  en la fuente; validar con equipo funcional."
+- Los estimados son complemento operativo: NO sustituyen ni resumen el detalle
+  real del CU.
+
+EJEMPLO DE DESCRIPTION:
+"Ruta estimada: Cotizadores Web → [módulo/funcionalidad indicada en el CU].
+Validar la ruta exacta con el equipo funcional. El escenario debe conservar
+además el contexto, reglas, datos, condiciones y resultado definidos en el CU."
+
+EJEMPLO DE STEP:
+"(Ruta estimada) Ingresar al módulo y seleccionar la funcionalidad indicada
+en el CU. Validar que se acceda a la funcionalidad correspondiente. La ruta
+exacta de menú debe ser confirmada con el equipo funcional."
+
+6. EXCEL AZURE — NO CAMBIAR ESTAS REGLAS
 - Un CP debe exportarse como un bloque: una fila de cabecera + todas sus filas de Steps.
 - En la cabecera: ID, Work Item Type, Title, Area Path, IDPadre, Tipo Origen Proyecto,
   Tiempo Real, Assigned To y State.
 - En las filas de pasos: SOLO Test Step, Step Action y Step Expected.
+- Tipo Origen Proyecto = Proyecto.
+- Area Path = COTIZADORES WEB\\DESARROLLO.
+- IDPadre = vacío.
+- No crear un CP por cada Step.
 """
-
 
 def generate_qa_data(
     prompt_text,
@@ -698,7 +800,7 @@ def generate_qa_data(
     model_name,
     temperature=0.1,
     max_retries=2,
-    initial_wait=5,
+    initial_wait=10,
 ):
     if genai is None:
         raise RuntimeError("No está instalada la librería google-genai.")
@@ -725,7 +827,12 @@ def generate_qa_data(
         "La HU/documentación actual es la única fuente de verdad funcional. "
         "Usa el CU completo como fuente principal del CP y conserva sus detalles. "
         "Debe existir mínimo un CP por cada CU y cada CP debe corresponder a un solo CU. "
-        "IMPORTANTE: El campo Related Use Case en TEST_CASES debe coincidir EXACTAMENTE con el ID del CU en USE_CASES.\n"
+        "No conviertas Steps en CP. "
+        "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
+        "debe validarse contra los CU reales identificados en USE_CASES. "
+        "Puedes incluir rutas estimadas tanto en Description como en Steps cuando exista evidencia suficiente; "
+        "deben marcarse como Ruta estimada/Navegación sugerida y generar Validation Required. "
+        "No presentes una ruta estimada como confirmada ni inventes botones, URLs o menús sin sustento.\n"
         "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
@@ -733,6 +840,9 @@ def generate_qa_data(
 
     client = genai.Client(api_key=api_key)
 
+    # Prefer selected model, then use fallbacks.
+    # IMPORTANTE: si un modelo devuelve 429/RESOURCE_EXHAUSTED, NO se vuelve a
+    # intentar el mismo modelo; se pasa inmediatamente al siguiente candidato.
     candidates = []
     for candidate in [model_name] + FALLBACK_MODELS:
         if candidate and candidate not in candidates:
@@ -765,15 +875,16 @@ def generate_qa_data(
                     )
                     if not match:
                         raise RuntimeError(
-                            f"{candidate}: la respuesta no es JSON válido."
+                            f"{candidate}: la respuesta no es JSON válido. "
+                            f"Respuesta: {response_text[:1200]}"
                         )
                     data = json.loads(match.group(1))
 
                 validated = validate_qa_structure(data)
                 validate_minimum_cu_coverage(validated)
 
-                if "quota_exceeded" in st.session_state:
-                    st.session_state.quota_exceeded = False
+                st.session_state.quota_exceeded = False
+                st.session_state.retry_count = 0
 
                 return validated
 
@@ -799,22 +910,42 @@ def generate_qa_data(
                     or "timeout" in error_text
                 )
 
-                if is_quota and attempt < max_retries:
-                    # Espera más corta si pasamos al siguiente modelo candidate
-                    time.sleep(initial_wait)
+                if is_quota:
+                    st.session_state.quota_exceeded = True
+                    st.session_state.retry_count = attempt + 1
+
+                # A 400 caused by an unsupported request/schema should not
+                # be retried against the same model; move to next candidate.
+                is_bad_request = (
+                    "400" in detail
+                    or "invalid argument" in error_text
+                    or "invalid_argument" in error_text
+                    or "unsupported" in error_text
+                )
+
+                # 429 / RESOURCE_EXHAUSTED: no insistir sobre el mismo modelo.
+                # Saltar inmediatamente al siguiente modelo disponible.
+                if is_quota:
+                    break
+
+                if (
+                    attempt < max_retries
+                    and is_retryable_internal
+                ):
+                    time.sleep(initial_wait * (attempt + 1))
                     continue
 
-                if is_retryable_internal and attempt < max_retries:
-                    time.sleep(initial_wait)
-                    continue
+                if is_bad_request or is_retryable_internal:
+                    break
 
-                # Si dio error 429 sin retries o error de schema, pasamos directamente al siguiente candidate
+                # Validation/JSON errors are meaningful and should be shown,
+                # but we still allow another model to try.
                 break
 
     joined = "\n\n".join(errors[-8:])
     raise RuntimeError(
         "Gemini no pudo completar la generación con los modelos probados.\n\n"
-        "Detalle técnico:\n" + joined
+        "Detalle técnico: " + "\n".join(errors[-8:])
     )
 
 
@@ -822,6 +953,18 @@ def generate_qa_data(
 # EXCEL — ESTRUCTURA APROBADA
 # ============================================================
 def create_excel(data, config_key):
+    """
+    Genera:
+      1) Hoja 'Azure Import' con la estructura aprobada para Azure, agregando Tipo Origen Proyecto.
+      2) Hoja 'Matriz QA' conservando la estructura aprobada.
+
+    Importante:
+    - Para CP nuevos, ID queda vacío.
+    - Cada CP es un bloque: una fila de cabecera seguida por sus pasos.
+    - En las filas de pasos se dejan vacíos los campos de cabecera, igual que en
+      el Excel exportado de Azure Test Plans usado como referencia.
+    - El ID funcional CP-AC-... se conserva dentro del Title, no en la columna ID.
+    """
     config = EXCEL_CONFIGS[config_key]
     output = io.BytesIO()
 
@@ -836,6 +979,7 @@ def create_excel(data, config_key):
         )
         title_base = build_case_title(tc, case_id)
 
+        # Conservamos nuestro identificador funcional en el título.
         title = f"{case_id} - {title_base}" if not title_base.startswith(case_id) else title_base
 
         description = safe_text(tc.get("Description"))
@@ -870,6 +1014,13 @@ def create_excel(data, config_key):
             if general_alerts:
                 alerts = " | ".join(general_alerts)
 
+        # --------------------------------------------------------
+        # AZURE IMPORT — ESTRUCTURA DEL EXPORT DE AZURE TEST PLANS
+        # --------------------------------------------------------
+        # Un CP = una fila de cabecera + todas sus filas de pasos.
+        # La cabecera contiene ID/Work Item Type/Title y metadatos.
+        # Las filas siguientes contienen SOLO Test Step/Step Action/Step Expected.
+        # Esta estructura evita que Azure interprete cada paso como un nuevo CP.
         area_path = "COTIZADORES WEB\\DESARROLLO"
         assigned_to = safe_text(config.get("assigned_to"))
         state = "Design"
@@ -884,6 +1035,7 @@ def create_excel(data, config_key):
         else:
             steps_for_export = steps
 
+        # Fila cabecera: exactamente una por CP.
         azure_rows.append({
             "ID": "",
             "Work Item Type": work_item_type,
@@ -899,6 +1051,7 @@ def create_excel(data, config_key):
             "State": state,
         })
 
+        # Filas de pasos: solo Step/Action/Expected, igual al modelo exportado de Azure.
         for step_index, step in enumerate(steps_for_export, start=1):
             azure_rows.append({
                 "ID": "",
@@ -921,6 +1074,9 @@ def create_excel(data, config_key):
                 "State": "",
             })
 
+        # --------------------------------------------------------
+        # MATRIZ QA — se conserva sin cambios de columnas.
+        # --------------------------------------------------------
         matriz_rows.append({
             "TestCaseId": case_id,
             "Title": title,
@@ -953,12 +1109,14 @@ def create_excel(data, config_key):
     df_matriz = pd.DataFrame(matriz_rows, columns=MATRIZ_COLUMNS)
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # Hoja compatible con Azure DevOps Test Plans.
         df_azure.to_excel(
             writer,
             sheet_name="Azure Import",
             index=False,
         )
 
+        # Matriz aprobada.
         df_matriz.to_excel(
             writer,
             sheet_name="Matriz QA",
@@ -1000,7 +1158,34 @@ def _unique_values(cases, key):
     return values
 
 
+def _pdf_bullets(story, items, style, prefix="•"):
+    for item in items:
+        text = safe_text(item)
+        if text:
+            story.append(Paragraph(f"{prefix} {pdf_text(text)}", style))
+
+
+def _coverage_summary(data):
+    rows = []
+    for item in data.get("COVERAGE", []) or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append({
+            "Requirement / Use Case": safe_text(item.get("Requirement / Use Case")),
+            "Criterion": safe_text(item.get("Criterion")),
+            "Scenario": safe_text(item.get("Scenario")),
+            "Test Case": safe_text(item.get("Test Case")),
+            "Validation Method": normalize_validation_method(
+                item.get("Validation Method")
+            ),
+            "Coverage": normalize_coverage(item.get("Coverage")),
+            "Alerts": safe_text(item.get("Alerts")),
+        })
+    return rows
+
+
 def _register_reference_fonts():
+    """Use Aptos from the supplied client reference when bundled."""
     font_dir = Path(__file__).resolve().parent / "fonts"
     regular = font_dir / "Aptos.ttf"
     bold = font_dir / "Aptos-Bold.ttf"
@@ -1019,6 +1204,7 @@ def _register_reference_fonts():
 
 
 def _case_bullets_as_paragraphs(story, text, style):
+    """Render source-style bullets without introducing a new table/column."""
     value = safe_text(text)
     if not value:
         return
@@ -1029,6 +1215,20 @@ def _case_bullets_as_paragraphs(story, text, style):
 
 
 def create_pdf(data, config_key, source_name=""):
+    """
+    V16 — PDF alineado visual y estructuralmente con el Test Plan del cliente.
+
+    Se conserva la estructura de referencia:
+      1) bloque inicial tipo tabla: Descripción del Software, Objetivos,
+         Elementos requeridos, Lista de ítems que no serán probados y Entregables;
+      2) Test plan Ejecución;
+      3) DETALLE DE LOS CASOS DE PRUEBA;
+      4) por caso: Test case, SUMMARY, Producto, Módulo, Descripción,
+         Resultado esperado de la prueba, Precondiciones y Caso de uso relacionado.
+
+    No agrega columnas ni bloques de resumen que no existen en el documento de
+    referencia. Los datos del caso siguen proviniendo del resultado QA.
+    """
     buffer = io.BytesIO()
     regular_font, bold_font, italic_font = _register_reference_fonts()
 
@@ -1056,6 +1256,9 @@ def create_pdf(data, config_key, source_name=""):
         "ref_body", parent=styles["Normal"], fontName=regular_font,
         fontSize=8, leading=10,
     )
+    cell_body_bold = ParagraphStyle(
+        "ref_body_bold", parent=cell_body, fontName=bold_font,
+    )
     section = ParagraphStyle(
         "ref_section", parent=styles["Normal"], fontName=bold_font,
         fontSize=9.5, leading=11, spaceBefore=8, spaceAfter=5,
@@ -1072,6 +1275,9 @@ def create_pdf(data, config_key, source_name=""):
         "ref_body_main", parent=styles["Normal"], fontName=regular_font,
         fontSize=8.3, leading=11, spaceAfter=4,
     )
+    body_bold = ParagraphStyle(
+        "ref_body_bold_main", parent=body, fontName=bold_font,
+    )
     small_note = ParagraphStyle(
         "ref_note", parent=body, fontName=italic_font,
         fontSize=7.5, leading=9.5,
@@ -1083,8 +1289,10 @@ def create_pdf(data, config_key, source_name=""):
     product_text = ", ".join(products) if products else "No definido en la fuente"
     module_text = ", ".join(modules) if modules else "No definido en la fuente"
 
+    # Fuente del documento: solo se usa para identificar el entregable, no para inventar un ID.
     plan_name = safe_text(source_name, "Documentación proporcionada")
 
+    # Descripción y objetivos se derivan de los casos generados, sin inventar información adicional.
     descriptions = []
     objectives = []
     for tc in cases:
@@ -1102,6 +1310,9 @@ def create_pdf(data, config_key, source_name=""):
         "para derivar los casos de prueba."
     )
 
+    # ========================================================
+    # BLOQUE INICIAL — MISMA ESTRUCTURA DE LA REFERENCIA
+    # ========================================================
     story = []
     story.append(Paragraph(f"Test plan: {pdf_text(plan_name)}", title_style))
 
@@ -1127,6 +1338,7 @@ def create_pdf(data, config_key, source_name=""):
         Paragraph("4. Requerimiento (opcional)", cell_body),
     ]
 
+    # Build nested content as one cell to reproduce the client's two-column table.
     desc_cell = Paragraph(pdf_text(description_text), cell_body)
     obj_cell = objectives_flow or [Paragraph("No se identificaron objetivos explícitos en la información procesada.", cell_body)]
     elem_cell = elements_flow
@@ -1157,6 +1369,9 @@ def create_pdf(data, config_key, source_name=""):
     story.append(Spacer(1, 7))
     story.append(Paragraph("DETALLE DE LOS CASOS DE PRUEBA", section))
 
+    # ========================================================
+    # CASOS — MISMA SECUENCIA DE CAMPOS DE LA REFERENCIA
+    # ========================================================
     for idx, tc in enumerate(cases, start=1):
         case_id = safe_text(tc.get("ID"), f"CP-{idx:05d}")
         title_value = build_case_title(tc, case_id)
@@ -1207,6 +1422,8 @@ def create_pdf(data, config_key, source_name=""):
                 body,
             ))
 
+        # Los Steps se conservan, pero se presentan como texto corrido/numerado,
+        # sin crear una tabla o columnas nuevas que no existen en la referencia.
         steps = safe_steps(tc)
         if steps:
             story.append(Spacer(1, 3))
@@ -1225,6 +1442,8 @@ def create_pdf(data, config_key, source_name=""):
                         body,
                     ))
 
+        # Alerts are only printed when the case actually has one, avoiding a new
+        # permanent section in every case.
         case_alerts = tc.get("Alerts", [])
         if isinstance(case_alerts, list) and case_alerts:
             for alert in case_alerts:
@@ -1248,7 +1467,9 @@ def create_pdf(data, config_key, source_name=""):
     return buffer.getvalue()
 
 
+
 def coverage_gate_or_stop(data):
+    """Renderiza métricas y detiene el flujo si la cobertura es incompleta."""
     metrics = calculate_cu_coverage(
         data.get("TEST_CASES", []),
         data.get("USE_CASES", [])
@@ -1325,14 +1546,16 @@ with st.sidebar:
         "Espera inicial (segundos)",
         min_value=1,
         max_value=60,
-        value=5,
+        value=10,
     )
 
 
 st.subheader("📁 Carga de Documento")
 
 st.info(
-    "Formatos de HU: TXT, MD, PDF, DOCX, XLSX/CSV."
+    "Formatos de HU: TXT, MD, PDF, DOCX, XLSX/CSV. "
+    "Para PDF escaneado se requiere OCR; esta versión no inventa "
+    "texto que no pueda extraer."
 )
 
 uploaded = st.file_uploader(
@@ -1343,6 +1566,7 @@ uploaded = st.file_uploader(
 source_text = st.session_state.source_content
 
 if uploaded:
+    # Procesar solo cuando cambia el archivo.
     if st.session_state.source_name != uploaded.name:
         try:
             with st.spinner(f"Procesando {uploaded.name}..."):
@@ -1414,6 +1638,7 @@ if st.button(
                 int(wait_time),
             )
 
+        # Regla obligatoria: validar cobertura antes de exportar.
         coverage_metrics = coverage_gate_or_stop(result)
 
         st.session_state.result_json = result
@@ -1453,9 +1678,14 @@ if result:
     )
     render_cu_coverage(current_coverage)
 
+    # ========================================================
+    # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
+    # V13: un CU por Test Case + eliminar CP
+    # ========================================================
     st.subheader("✏️ Editar caso de prueba")
     st.caption(
-        "Revisa y ajusta el caso antes de descargar Excel/PDF."
+        "Revisa y ajusta el caso antes de descargar Excel/PDF. "
+        "Cada Test Case debe conservar un único Caso de Uso relacionado."
     )
 
     case_options = []
@@ -1515,7 +1745,8 @@ if result:
         st.markdown("### 🗑️ Eliminar caso de prueba")
 
         st.warning(
-            "Esta acción elimina el Test Case seleccionado de la generación actual."
+            "Esta acción elimina el Test Case seleccionado de la generación actual "
+            "y también elimina su relación en COVERAGE. No elimina otros casos."
         )
 
         confirm_delete = st.checkbox(
@@ -1530,6 +1761,7 @@ if result:
             key=f"v13_delete_cp_{selected_index}",
         ):
             deleted_id = selected_case_id
+            # Simular eliminación antes de aplicarla para preservar 1 CP mínimo por CU.
             candidate_cases = [
                 tc for i, tc in enumerate(result.get("TEST_CASES", []))
                 if i != selected_index
@@ -1554,6 +1786,13 @@ if result:
                 st.rerun()
     else:
         st.info("No hay Test Cases para editar.")
+
+    if not safe_text(EXCEL_CONFIGS[selected_config].get("area_path")) or not safe_text(EXCEL_CONFIGS[selected_config].get("assigned_to")):
+        st.warning(
+            "⚠️ El Excel conserva la estructura Azure y agrega Tipo Origen Proyecto = Proyecto. "
+            "Antes de importar, verifica Assigned To en EXCEL_CONFIGS "
+            "con valores reales de tu proyecto/organización; no se inventan automáticamente."
+        )
 
     coverage_ok_for_download = calculate_cu_coverage(
         result.get("TEST_CASES", []),
