@@ -1,447 +1,241 @@
-# PROMPT QA V24 — REDACCIÓN QA + COBERTURA OBLIGATORIA POR CU
+# PROMPT QA V26 — REDACCIÓN + COBERTURA POR CU + AZURE REAL
 
 ## OBJETIVO
 
-Generar Test Cases funcionales DRAFT con una redacción clara, específica, ejecutable y similar al nivel de detalle utilizado en los proyectos QA históricos del equipo.
+Generar Test Cases funcionales DRAFT a partir de la HU/documentación cargada, con redacción profesional, ejecutable y específica.
 
-Los documentos históricos sirven como patrón interno de redacción y granularidad. NO se deben mencionar en la salida, NO se deben crear campos de referencias y NO se deben escribir frases como "referencia sugerida".
+La HU/documentación actual es la fuente de verdad funcional.
 
-La salida debe parecer un Test Case real del equipo QA.
-
-La HU/documentación actual es la fuente de verdad para el contenido funcional.
+Los casos históricos del equipo NO deben aparecer como referencias, campos, comentarios ni información visible para el usuario. Su aporte es únicamente establecer el estándar de calidad de redacción cuando el sistema ya dispone de esos ejemplos internamente.
 
 ---
 
-# 1. REGLAS DE COBERTURA
+## REGLA CRÍTICA DE COBERTURA
 
-1. **MÍNIMO 1 CP POR CADA CU:** identifica TODOS los Casos de Uso de la HU/documentación antes de redactar los CP. Para CADA CU identificado, genera al menos un Test Case propio. Ningún CU puede quedar sin cobertura.
-2. **VERIFICACIÓN DE COBERTURA:** antes de finalizar, compara la lista de CU identificados contra `Related Use Case` de los CP generados. Si falta algún CU, crea el CP faltante antes de entregar.
-3. **COBERTURA EXPLÍCITA:** el campo `Related Use Case` de cada CP debe contener exactamente un CU identificado en la fuente, no una categoría general ni varios CU.
-4. Cada CP debe estar relacionado con un único CU.
-5. No relacionar un CP con varios CU.
-6. No combinar funcionalidades diferentes en un mismo CP.
-7. Crear escenarios adicionales solamente cuando exista una diferencia funcional real y sustentada.
-8. No generar escenarios artificiales para aumentar la cantidad.
-9. No duplicar casos.
+1. Identificar TODOS los Casos de Uso (CU) presentes en la documentación.
+2. Generar como mínimo UN Test Case independiente por cada CU.
+3. Ningún CU puede quedar sin cobertura.
+4. Cada CP debe relacionarse con UN SOLO CU.
+5. No crear relaciones entre funcionalidades distintas.
+6. Crear escenarios adicionales únicamente cuando aporten una cobertura funcional real y estén sustentados.
+7. No exagerar la cantidad de escenarios.
+8. No duplicar CP.
 
----
+Antes de entregar la salida, comprobar:
 
-# 2. PRODUCTO Y MÓDULO
+CU identificados = CU con al menos un CP.
 
-Cuando la funcionalidad corresponda a Autos Colectivos utilizar exactamente:
-
-Producto:
-`Cotizadores Web`
-
-Módulo:
-`Cotizador Autos Colectivos`
-
-No utilizar variantes.
+Si algún CU no tiene CP, corregir la generación antes de entregar.
 
 ---
 
-# 3. PRINCIPIO DE REDACCIÓN
+## PRODUCTO Y MÓDULO
 
-Los casos deben estar escritos como casos de prueba preparados para ser ejecutados por un QA.
+Para la funcionalidad correspondiente usar:
 
-No escribir explicaciones para el usuario.
-No escribir recomendaciones.
-No escribir referencias históricas.
-No escribir "según ejemplos anteriores".
-No escribir "referencia sugerida".
-No agregar comentarios que no pertenezcan al Test Case.
+Producto: Cotizadores Web
+Módulo: Cotizador Autos Colectivos
 
-La información histórica debe influir únicamente en LA CALIDAD DE LA REDACCIÓN.
+No cambiar estos nombres cuando correspondan a la funcionalidad analizada.
 
 ---
 
-# 4. DESCRIPTION — REGLA DE CALIDAD
+## REDACCIÓN
 
-La Description NO debe limitarse a repetir el título ni a decir "validar que funciona correctamente".
-
-Debe explicar el escenario funcional de forma natural.
-
-Cuando la documentación lo permita, construir la Description siguiendo esta lógica:
-
-CONTEXTO → UBICACIÓN/FUNCIONALIDAD → ACCIÓN → OBJETIVO DE VALIDACIÓN
-
-Ejemplo de estructura:
-
-`Ingresar al [módulo/funcionalidad] con el [perfil documentado], acceder a [opción documentada] y realizar [acción funcional], con el propósito de validar [comportamiento definido].`
-
-No utilizar esta frase literalmente si la HU tiene información diferente.
-
-La redacción debe adaptarse al contenido real.
-
-### Evitar
-
-`Validar funcionalidad de productos.`
-
-`Validar que el sistema funciona correctamente.`
-
-`Verificar proceso.`
-
-`Realizar prueba de la funcionalidad.`
-
-### Preferir
-
-Una descripción que explique:
-- dónde se realiza;
-- sobre qué funcionalidad;
-- qué acción se ejecuta;
-- qué comportamiento se valida.
-
-Solo incluir los elementos que estén sustentados.
-
----
-
-# 5. RESULTADO ESPERADO DE LA PRUEBA
-
-El Resultado Esperado debe ser específico y comprobable.
-
-Debe responder:
-
-`¿Qué debe observar o comprobar el QA después de ejecutar el escenario?`
-
-Evitar:
-
-- "Se realiza correctamente."
-- "Funciona correctamente."
-- "La información se muestra."
-- "El proceso finaliza exitosamente."
-
-Preferir resultados que describan el comportamiento funcional:
-
-- información que debe mostrarse;
-- opciones que deben estar disponibles;
-- datos que deben conservarse;
-- validaciones que deben ejecutarse;
-- reglas que deben aplicarse;
-- mensajes documentados;
-- estado resultante;
-- comportamiento posterior a guardar/consultar/modificar.
-
-Nunca inventar un comportamiento no documentado.
-
----
-
-# 6. PRECONDICIONES
-
-Las precondiciones deben representar las condiciones necesarias para ejecutar el CP.
-
-Extraerlas de la HU.
-
-Pueden incluir cuando estén documentadas:
-
-- perfil;
-- permisos;
-- acceso;
-- existencia de registros;
-- estado de la información;
-- configuración;
-- datos requeridos;
-- cotización;
-- productos;
-- condiciones previas.
-
-No convertir información hipotética en una precondición.
-
-No agregar datos que no estén sustentados.
-
----
-
-# 7. STEPS — REDACCIÓN EJECUTABLE
-
-Los Steps deben permitir que otro QA ejecute la prueba sin tener que interpretar qué quiso decir el autor.
-
-Cada Step debe representar una acción funcional concreta.
-
-## Regla
-
-Una acción principal = un Step.
-
-### Evitar
-
-`Ingresar al módulo, buscar la cotización, seleccionar productos y guardar los cambios.`
-
-Este Step contiene demasiadas acciones.
-
-### Preferir
-
-Step 1:
-Action: `Ingresar al módulo Cotizador Autos Colectivos.`
-Expected: `Se muestra el módulo Cotizador Autos Colectivos.`
-
-Step 2:
-Action: `Consultar la cotización indicada en la documentación.`
-Expected: `Se muestra la información correspondiente a la cotización.`
-
-Step 3:
-Action: `Seleccionar la opción Productos y Coberturas.`
-Expected: `Se muestra la información de productos y coberturas definida para la cotización.`
-
-Step 4:
-Action: `Guardar los cambios realizados.`
-Expected: `La información queda guardada de acuerdo con el comportamiento definido en la HU.`
-
-Los ejemplos anteriores son únicamente de estructura. Utilizar siempre el contenido real de la HU.
-
----
-
-# 8. ACTION
-
-El campo Action debe comenzar con un verbo de acción claro.
-
-Preferir:
-
-- Ingresar
-- Seleccionar
-- Consultar
-- Buscar
-- Registrar
-- Editar
-- Modificar
-- Eliminar
-- Guardar
-- Confirmar
-- Validar
-- Descargar
-- Visualizar
-- Ejecutar
-- Diligenciar
-
-Evitar acciones ambiguas como:
-
-- "Realizar proceso"
-- "Continuar"
-- "Hacer prueba"
-- "Verificar funcionamiento"
-
-si la documentación permite especificar la acción.
-
----
-
-# 9. EXPECTED DE CADA STEP
-
-Cada Action debe tener un Expected coherente con esa acción.
-
-No colocar el resultado final de todo el caso en cada Step.
-
-### Incorrecto
-
-Action:
-`Seleccionar Productos.`
-
-Expected:
-`La cotización queda guardada y se actualizan todas las coberturas.`
-
-Si guardar ocurre posteriormente, ese resultado no corresponde a este Step.
-
-### Correcto
-
-Action:
-`Seleccionar Productos.`
-
-Expected:
-`Se muestra la sección Productos.`
-
----
-
-# 10. SECUENCIA LÓGICA
-
-Los Steps deben respetar la secuencia natural de ejecución:
-
-1. Acceso.
-2. Navegación.
-3. Consulta/búsqueda.
-4. Selección.
-5. Diligenciamiento o modificación.
-6. Ejecución.
-7. Confirmación.
-8. Validación del resultado.
-
-No agregar pasos innecesarios.
-
-No repetir pasos que ya estén cubiertos por otro Step.
-
----
-
-# 11. DETALLE SIN EXAGERACIÓN
-
-El agente debe buscar el nivel de detalle utilizado por un QA experimentado.
-
-Debe ser:
-
-`ESPECÍFICO + EJECUTABLE + VERIFICABLE`
-
-pero no:
-
-`LARGO + REPETITIVO + ARTIFICIAL`
-
-Un CP con 20 pasos no es mejor que uno con 6 pasos si ambos cubren la misma funcionalidad.
-
----
-
-# 12. REGLA PARA USUARIOS, PERFILES Y RUTAS
-
-Si la HU documenta un usuario, perfil, ruta, pantalla, menú u opción, utilizar el nombre documentado.
-
-Si la información no está en la HU, NO inventarla.
-
-Los documentos históricos pueden orientar internamente la elección de terminología cuando exista evidencia suficiente, pero esa información NO debe aparecer como una referencia ni como un comentario.
-
-Si no existe evidencia suficiente, utilizar únicamente la información disponible en la HU.
-
----
-
-# 13. NO INVENTAR
-
-Nunca inventar:
-
-- usuarios;
-- perfiles;
-- rutas;
-- URLs;
-- botones;
-- campos;
-- mensajes;
-- permisos;
-- valores;
-- reglas;
-- estados;
-- datos;
-- resultados.
-
-Cuando falte información necesaria para ejecutar un paso:
-
-- mantener el paso sustentado;
-- generar una alerta;
-- no rellenar el vacío con una suposición.
-
----
-
-# 14. ESTILO DE LOS CASOS HISTÓRICOS
-
-Tomar como estándar de calidad los siguientes principios observados en los casos históricos:
-
-- Descripciones orientadas al contexto funcional.
-- Resultados esperados específicos.
-- Precondiciones útiles para preparar la ejecución.
-- Acciones expresadas con verbos claros.
-- Pasos separados por acción.
-- Expected asociado directamente con cada acción.
-- Terminología funcional consistente.
-- Validaciones concretas.
-- Redacción profesional y directa.
-
-NO copiar frases completas de casos históricos.
-
-NO trasladar reglas de negocio de un proyecto a otro.
-
----
-
-# 15. ESTRUCTURA DEL TEST CASE
-
-Mantener la estructura aprobada:
-
-- ID
-- Title
-- Product
-- Module
-- Description
-- Expected Result
-- Preconditions
-- Related Use Case
-- Steps
-  - Step
-  - Action
-  - Expected
-
-No agregar una sección de referencias históricas.
-
-No agregar una columna de referencias.
-
-No agregar un campo de "referencia sugerida".
-
----
-
-# 16. AZURE IMPORT
-
-Mantener el modelo aprobado para Azure Import:
-
-`TestCaseId`
-`Title`
-`TestStep`
-`StepAction`
-`StepExpected`
-`TestPointId`
-`Configuration`
-`Tester`
-`Outcome`
-`Comment`
-
-No agregar columnas.
-
-Cada Step debe ocupar una fila.
-
-La calidad de la redacción de Description y Steps debe conservarse en la salida Azure.
-
----
-
-# 17. VALIDACIÓN AUTOMÁTICA ANTES DE ENTREGAR
-
-Antes de generar el resultado final, revisar cada CP.
+La redacción debe parecer escrita por un QA que conoce la funcionalidad.
 
 ### Description
-- ¿Explica el contexto?
-- ¿Explica qué funcionalidad se prueba?
-- ¿Explica qué acción/objetivo se valida?
-- ¿Evita ser genérica?
 
-### Expected Result
-- ¿Es verificable?
-- ¿Describe un comportamiento concreto?
-- ¿Está sustentado?
+Debe explicar el contexto funcional, la ubicación/funcionalidad, la acción principal y el objetivo de validación, únicamente cuando estén sustentados.
+
+Evitar:
+- "Validar funcionalidad."
+- "Verificar que funcione correctamente."
+- "Realizar prueba del proceso."
+
+Preferir una descripción concreta y ejecutable.
 
 ### Preconditions
-- ¿Son necesarias?
-- ¿Están sustentadas?
-- ¿No contienen supuestos?
+
+Incluir únicamente condiciones necesarias y sustentadas por la HU:
+- usuario/perfil;
+- permisos;
+- datos;
+- registros;
+- estado;
+- configuración;
+- acceso;
+- condiciones previas.
+
+No inventar.
 
 ### Steps
-- ¿Cada acción principal está separada?
-- ¿Empieza con un verbo claro?
-- ¿El Expected corresponde exactamente al Action?
-- ¿La secuencia es lógica?
-- ¿Hay pasos innecesarios?
-- ¿Se puede ejecutar sin interpretar?
 
-### Cobertura
-- ¿Identifiqué TODOS los CU de la HU antes de generar los CP?
-- ¿Existe al menos un CP para CADA CU identificado?
-- ¿Hay algún CU sin CP? Si existe, NO entregar todavía: crear el CP faltante.
-- ¿Cada CP tiene solamente un CU?
-- ¿`Related Use Case` coincide con un CU real de la fuente?
-- ¿No se mezclaron funcionalidades?
-- ¿Los escenarios adicionales realmente aportan cobertura?
+Cada paso debe representar una acción principal.
 
-### Calidad general
+Usar verbos claros:
+Ingresar, seleccionar, consultar, buscar, registrar, editar, modificar, eliminar, guardar, confirmar, visualizar, diligenciar, ejecutar, descargar, etc.
 
-El CP final debe parecer escrito por un QA que conoce el producto y el estándar documental del equipo, aunque su contenido provenga exclusivamente de la HU analizada.
+La acción debe contener el nivel de detalle necesario para que otro QA pueda ejecutarla sin interpretar la intención.
+
+Si la HU documenta una ruta, pantalla, menú, opción, usuario, perfil, campo o dato, utilizar la terminología documentada.
+
+No inventar rutas, usuarios, URLs, botones, campos, mensajes, reglas o valores.
+
+### Expected
+
+Cada Step Action debe tener un Step Expected correspondiente a esa acción.
+
+El Expected debe ser observable/verificable y no limitarse a:
+- "Se realiza correctamente."
+- "Funciona correctamente."
+- "Se muestra correctamente."
+
+Describir el resultado funcional sustentado.
 
 ---
 
-# 18. PRINCIPIO FINAL
+## NIVEL DE DETALLE
 
-NO aumentar la calidad agregando texto.
+Usar como patrón de calidad la estructura de los Test Cases reales del Excel exportado por Azure:
 
-Aumentar la calidad agregando:
-
-- contexto correcto;
 - acciones concretas;
+- contexto suficiente;
+- navegación explícita cuando esté documentada;
+- datos o perfiles cuando estén sustentados;
 - resultados verificables;
-- secuencia lógica;
-- terminología consistente;
-- detalle funcional sustentado.
+- secuencia lógica.
 
-La meta es que un QA pueda tomar el CP generado y ejecutar la prueba prácticamente sin tener que reinterpretar la intención del caso.
+No copiar literalmente textos de otros casos.
+No trasladar reglas de negocio de un caso a otro.
+
+---
+
+## AZURE — ESTRUCTURA REAL DEL ARCHIVO
+
+La estructura de referencia proporcionada por Azure contiene exactamente estas columnas:
+
+1. ID
+2. Work Item Type
+3. Title
+4. Test Step
+5. Step Action
+6. Step Expected
+7. Area Path
+8. IDPadre
+9. Tiempo Real
+10. Assigned To
+11. State
+
+La salida de importación debe respetar exactamente este orden y estas columnas.
+
+NO agregar:
+- Tipo Origen Proyecto
+- TestPointId
+- Configuration
+- Tester
+- Outcome
+- Comment
+- otras columnas.
+
+### Valores para CP nuevos
+
+ID:
+- dejar vacío.
+
+Work Item Type:
+- `Test Case`
+
+Title:
+- utilizar el identificador aprobado, por ejemplo:
+  `CP-AC-CAC-00001 - <nombre descriptivo>`
+
+Test Step:
+- numeración secuencial por CP.
+
+Step Action:
+- acción ejecutable y específica.
+
+Step Expected:
+- resultado verificable correspondiente a la acción.
+
+Area Path:
+- usar el valor configurado por el proyecto si está disponible.
+- no inventar.
+
+IDPadre:
+- dejar vacío para CP nuevos, salvo que el usuario configure explícitamente otro valor.
+
+Tiempo Real:
+- dejar vacío si no existe un valor definido por el usuario.
+
+Assigned To:
+- usar el valor configurado por el usuario si existe.
+- no inventar.
+
+State:
+- `Design` para CP nuevos, salvo configuración explícita diferente.
+
+---
+
+## ESTRUCTURA QA INTERNA
+
+La Matriz QA puede mantener los campos definidos por el proyecto para documentar:
+
+- TestCaseId
+- Title
+- Requirement / Use Case
+- Criterion
+- Scenario
+- Scenario Type
+- Description
+- Preconditions
+- Validation Method
+- Coverage
+- Alerts
+- Effort
+
+No agregar campos de referencias históricas.
+
+---
+
+## VALIDACIÓN FINAL
+
+Antes de entregar:
+
+### Cobertura
+- Todos los CU tienen mínimo un CP.
+- Cada CP tiene exactamente un CU.
+- No hay CU sin cobertura.
+- No hay CP duplicados.
+- No se mezclan funcionalidades.
+
+### Redacción
+- Description específica.
+- Preconditions útiles y sustentadas.
+- Actions ejecutables.
+- Expected verificables.
+- Secuencia lógica.
+- Sin texto genérico innecesario.
+
+### Azure
+- Exactamente 11 columnas.
+- Orden exacto.
+- Sin columnas adicionales.
+- CP nuevos con ID vacío.
+- IDPadre vacío.
+- Tiempo Real vacío si no fue configurado.
+- State Design.
+- Work Item Type Test Case.
+
+## REGLA FINAL
+
+La prioridad es:
+
+HU actual → fuente de verdad
++
+estándar de redacción QA → calidad
++
+estructura real exportada de Azure → formato de importación
+
+Nunca inventar información para llenar campos.
