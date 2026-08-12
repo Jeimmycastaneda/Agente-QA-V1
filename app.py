@@ -200,11 +200,11 @@ FALLBACK_MODELS = [
 # COLUMNAS APROBADAS — NO AGREGAR NI CAMBIAR TÍTULOS
 # ============================================================
 # Columnas EXACTAS requeridas por Azure DevOps Test Plans para importación XLSX.
-# Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP.
+# Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP y establece Tipo Origen Proyecto = Proyecto.
 AZURE_COLUMNS = [
     "ID", "Work Item Type", "Title", "Test Step", "Step Action",
-    "Step Expected", "Area Path", "IDPadre", "Tiempo Real",
-    "Assigned To", "State"
+    "Step Expected", "Area Path", "IDPadre", "Tipo Origen Proyecto",
+    "Tiempo Real", "Assigned To", "State"
 ]
 
 MATRIZ_COLUMNS = [
@@ -223,7 +223,7 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-AC-",
         "user_default": "Usuario registrado",
         "steps_with_users": True,
-        "area_path": "",
+        "area_path": "COTIZADORES WEB\\DESARROLLO",
         "assigned_to": "",
     },
     "Siniestros Fasecolda": {
@@ -235,7 +235,7 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-ACSF-",
         "user_default": "Suscriptor Oficina Principal, suscriptor sucursal autos",
         "steps_with_users": True,
-        "area_path": "",
+        "area_path": "COTIZADORES WEB\\DESARROLLO",
         "assigned_to": "",
     },
     "General QA": {
@@ -247,7 +247,7 @@ EXCEL_CONFIGS = {
         "title_prefix": "CP-",
         "user_default": "",
         "steps_with_users": False,
-        "area_path": "",
+        "area_path": "COTIZADORES WEB\\DESARROLLO",
         "assigned_to": "",
     },
 }
@@ -694,15 +694,7 @@ def generate_qa_data(
         + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
         "La HU/documentación actual es la única fuente de verdad funcional. "
         "No inventes rutas, usuarios, datos, campos, mensajes, reglas ni valores.\n"
-        + "\n\n==================== REGLA CRITICA DE ESTRUCTURA DE CP Y PASOS ====================\n"
-        "Cada objeto TEST_CASES representa UN SOLO caso de prueba/escenario funcional completo. "
-        "NO generes un TEST_CASE por cada paso, clic o acción individual. "
-        "Agrupa dentro de la propiedad Steps todas las acciones secuenciales necesarias para ejecutar y validar ese escenario. "
-        "Un mismo TEST_CASE debe contener varios Steps cuando el escenario requiera varias acciones. "
-        "Cada Step debe tener Step #, Action y Expected value. "
-        "Mantén mínimo un TEST_CASE por cada Caso de Uso y relaciona cada TEST_CASE con un único Caso de Uso. "
-        "Los CP adicionales solo deben representar escenarios funcionales realmente distintos; no deben existir CP adicionales únicamente para separar pasos.\n"
-        + "\n\n==================== REGLA DE SALIDA ====================\n"
+        "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
     )
@@ -817,14 +809,14 @@ def generate_qa_data(
 def create_excel(data, config_key):
     """
     Genera:
-      1) Hoja 'Azure Import' con las 11 columnas de la plantilla real exportada desde Azure.
+      1) Hoja 'Azure Import' con la estructura aprobada para Azure, agregando Tipo Origen Proyecto.
       2) Hoja 'Matriz QA' conservando la estructura aprobada.
 
     Importante:
     - Para CP nuevos, ID queda vacío.
-    - Cada CP es un bloque: una fila de cabecera seguida por sus pasos.
-    - En las filas de pasos, los campos de cabecera quedan vacíos, igual que
-      en la exportación de referencia de Azure Test Plans.
+    - Cada paso es una fila.
+    - ID, Work Item Type, Title, Area Path, Assigned To y State se repiten
+      en cada fila del mismo CP, tal como solicita el importador de Azure.
     - El ID funcional CP-AC-... se conserva dentro del Title, no en la columna ID.
     """
     config = EXCEL_CONFIGS[config_key]
@@ -877,12 +869,10 @@ def create_excel(data, config_key):
                 alerts = " | ".join(general_alerts)
 
         # --------------------------------------------------------
-        # AZURE IMPORT — ESTRUCTURA IGUAL A LA EXPORTACIÓN DE AZURE
+        # AZURE IMPORT
         # --------------------------------------------------------
-        # Un CP ocupa un bloque de filas: una fila de cabecera + sus pasos.
-        # La primera fila identifica el Test Case; las siguientes filas contienen
-        # únicamente Test Step / Step Action / Step Expected. Esto evita que Azure
-        # interprete cada paso como un nuevo Test Case.
+        # Azure crea un nuevo CP cuando ID está vacío.
+        # Repetimos los campos de cabecera en TODAS las filas del CP.
         area_path = safe_text(config.get("area_path"))
         assigned_to = safe_text(config.get("assigned_to"))
         state = "Design"
@@ -894,32 +884,17 @@ def create_excel(data, config_key):
                 "Action": "Información insuficiente para definir el paso.",
                 "Expected value": "Validar con el equipo funcional antes de ejecutar.",
             }]
+            comment = "ALERTA: caso sin pasos definidos."
         else:
             steps_for_export = steps
+            comment = ""
 
-        # Fila cabecera del CP: los datos del Test Case aparecen una sola vez.
-        azure_rows.append({
-            "ID": "",
-            "Work Item Type": work_item_type,
-            "Title": title,
-            "Test Step": "",
-            "Step Action": "",
-            "Step Expected": "",
-            "Area Path": area_path,
-            "IDPadre": "",
-            "Tiempo Real": "",
-            "Assigned To": assigned_to,
-            "State": state,
-        })
-
-        # Filas de pasos: se dejan vacíos los campos de cabecera, igual que
-        # en el Excel exportado desde Azure Test Plans.
         for step_index, step in enumerate(steps_for_export, start=1):
             azure_rows.append({
                 "ID": "",
-                "Work Item Type": "",
-                "Title": "",
-                "Test Step": step.get("Step #", step_index),
+                "Work Item Type": work_item_type,
+                "Title": title,
+                "Test Step": step_index,
                 "Step Action": safe_text(
                     step.get("Action"),
                     "Acción no definida",
@@ -928,11 +903,12 @@ def create_excel(data, config_key):
                     step.get("Expected value"),
                     "Resultado esperado no definido",
                 ),
-                "Area Path": "",
+                "Area Path": area_path or "COTIZADORES WEB\\DESARROLLO",
                 "IDPadre": "",
+                "Tipo Origen Proyecto": "Proyecto",
                 "Tiempo Real": "",
-                "Assigned To": "",
-                "State": "",
+                "Assigned To": assigned_to,
+                "State": state,
             })
 
         # --------------------------------------------------------
@@ -1650,8 +1626,8 @@ if result:
 
     if not safe_text(EXCEL_CONFIGS[selected_config].get("area_path")) or not safe_text(EXCEL_CONFIGS[selected_config].get("assigned_to")):
         st.warning(
-            "⚠️ El Excel ya usa las 9 columnas requeridas por Azure DevOps. "
-            "Antes de importar, configura Area Path y Assigned To en EXCEL_CONFIGS "
+            "⚠️ El Excel conserva la estructura Azure y agrega Tipo Origen Proyecto = Proyecto. "
+            "Antes de importar, verifica Assigned To en EXCEL_CONFIGS "
             "con valores reales de tu proyecto/organización; no se inventan automáticamente."
         )
 
