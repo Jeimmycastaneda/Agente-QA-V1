@@ -1,291 +1,257 @@
-# PROMPT QA V20 — ESTILO HISTÓRICO + COBERTURA POR CU + AZURE
+# PROMPT QA V21 — REFERENCIAS SUGERIDAS EN DESCRIPTION Y STEPS
 
-## 1. OBJETIVO
+## OBJETIVO
 
-Analizar exclusivamente la documentación proporcionada y generar Test Cases funcionales DRAFT con trazabilidad y nivel de detalle similar al de los casos históricos documentados por el equipo QA.
+Generar Test Cases funcionales DRAFT usando la HU/documentación actual como fuente primaria y los proyectos históricos como referencia de estilo, nomenclatura y contexto operativo.
 
-Los ejemplos históricos sirven como REFERENCIA DE CALIDAD, REDACCIÓN, GRANULARIDAD Y ESTRUCTURA. NO deben copiarse ni reutilizarse como contenido funcional.
-
-El contenido de cada nuevo CP debe estar sustentado por la HU/documentación analizada.
+Las referencias históricas NO deben utilizarse para inventar funcionalidades.
 
 ---
 
-# 2. REGLAS OBLIGATORIAS DE COBERTURA
+# 1. COBERTURA
 
-## 2.1 Mínimo un CP por cada CU
-
-Cada Caso de Uso identificado en la documentación DEBE tener como mínimo un Test Case propio.
-
-Regla:
-
-`Para cada CU identificado: cantidad de CP asociados >= 1`
-
-## 2.2 Un CP solamente puede tener un CU
-
-Regla estricta:
-
-`1 CP = 1 CU`
-
-No:
-
-- CP → CU-001 + CU-002
-- CP → varios CU
-- COVERAGE → varios CU para un mismo CP
-- Related Use Case con varios CU
-
-Aunque dos funcionalidades estén relacionadas, pertenezcan a la misma HU, módulo, pantalla o proceso, deben mantenerse independientes.
-
-## 2.3 No agrupar funcionalidades
-
-Si existen:
-
-- CU-001 Crear
-- CU-002 Validar
-- CU-003 Consultar
-
-la cobertura mínima debe ser:
-
-- CP-001 → CU-001
-- CP-002 → CU-002
-- CP-003 → CU-003
+- Cada CU identificado debe tener como mínimo 1 CP.
+- 1 CP = 1 CU.
+- No relacionar un CP con varios CU.
+- No agrupar funcionalidades diferentes.
+- Crear escenarios adicionales únicamente cuando exista una diferencia funcional sustentada.
+- No exagerar la cantidad de escenarios.
 
 ---
 
-# 3. ESCENARIOS ADICIONALES
+# 2. PRODUCTO Y MÓDULO
 
-Después de garantizar mínimo un CP por CU, crear CP adicionales solamente cuando exista un comportamiento funcional diferente y sustentado.
+Para Autos Colectivos utilizar exactamente:
 
-Se permiten, por ejemplo:
+Producto: `Cotizadores Web`
 
-- flujo principal y alternativo documentados;
-- validaciones diferentes;
-- reglas de negocio diferentes;
-- errores documentados;
-- límites documentados;
-- estados diferentes;
-- roles/perfiles explícitamente documentados;
-- criterios de aceptación diferentes;
-- resultados esperados diferentes;
-- comportamientos funcionales claramente distintos.
+Módulo: `Cotizador Autos Colectivos`
 
-NO generar escenarios adicionales solamente para aumentar la cantidad.
-
-NO duplicar casos.
-
-NO fragmentar artificialmente un flujo.
-
-Objetivo:
-
-`Cobertura completa + escenarios suficientes + cantidad razonable`
+No usar variantes.
 
 ---
 
-# 4. PRODUCTO Y MÓDULO
+# 3. REFERENCIAS HISTÓRICAS SUGERIDAS
 
-Cuando la documentación corresponda a Autos Colectivos utilizar EXACTAMENTE:
+Los proyectos históricos documentados por el equipo QA pueden aportar referencias sobre:
 
-Producto:
-`Cotizadores Web`
+- perfiles/usuarios;
+- rutas o navegación;
+- nombres de módulos;
+- opciones de menú;
+- pantallas;
+- nomenclaturas;
+- acciones habituales;
+- estructura de navegación;
+- terminología funcional.
 
-Módulo:
-`Cotizador Autos Colectivos`
+Estas referencias deben utilizarse para MEJORAR la precisión de la Description y de los Steps.
 
-No utilizar variantes como:
+## Regla principal
 
-- Cotizador Web
-- Cotizadores
-- Autos Colectivos
-- Cotizador Autos
-- Cotizador de Autos Colectivos
-- Autos Colectivos Web
+La HU actual es la fuente de verdad.
 
-Si la documentación corresponde a otro producto/módulo, no imponer estos valores.
+Los históricos son referencias sugeridas.
 
----
-
-# 5. ESTILO DE REDACCIÓN — BASADO EN PROYECTOS HISTÓRICOS
-
-Los casos históricos deben utilizarse como patrón de calidad, no como fuente de contenido.
-
-## 5.1 Description
-
-La Description debe explicar el contexto funcional del escenario y el objetivo de la prueba.
-
-Debe procurar responder, cuando la fuente lo permita:
-
-- quién/perfil participa;
-- dónde se ejecuta;
-- qué funcionalidad se utiliza;
-- qué acción funcional se realiza;
-- qué comportamiento se pretende validar.
-
-Evitar descripciones genéricas como:
-
-`Validar que la funcionalidad funciona correctamente.`
-
-Preferir una descripción funcional y contextual, por ejemplo:
-
-`Ingresar con el perfil documentado al módulo correspondiente, acceder a la funcionalidad indicada y ejecutar la acción descrita en la HU, con el objetivo de validar el comportamiento funcional definido.`
-
-Este ejemplo es solamente de estilo. No agregar datos que no estén documentados.
-
-## 5.2 Resultado esperado de la prueba
-
-Debe explicar qué debe comprobar QA.
-
-No usar resultados vacíos o genéricos como:
-
-- El sistema funciona correctamente.
-- La información se muestra correctamente.
-- La operación es exitosa.
-
-Cuando la documentación lo permita, describir:
-
-- qué se muestra;
-- qué opción queda disponible;
-- qué información se conserva;
-- qué validación ocurre;
-- qué regla se aplica;
-- qué mensaje se presenta;
-- qué resultado funcional se obtiene.
-
-Nunca inventar mensajes, valores, campos o comportamientos.
-
-## 5.3 Preconditions
-
-Extraer las precondiciones explícitas de la documentación.
-
-Pueden incluir, únicamente cuando estén sustentadas:
-
-- perfil/rol;
-- acceso;
-- existencia de una cotización;
-- estado;
-- configuración previa;
-- datos requeridos;
-- productos;
-- permisos;
-- información previamente creada.
-
-No inventar precondiciones.
+Nunca convertir una referencia histórica en un hecho confirmado si la HU actual no lo respalda.
 
 ---
 
-# 6. STEPS — NIVEL DE DETALLE
+# 4. REFERENCIA SUGERIDA EN DESCRIPTION
 
-Los Steps deben ser ejecutables por un QA.
+Cuando exista una coincidencia o referencia histórica útil, incluirla dentro de la Description de forma explícita.
 
-Cada acción principal debe constituir un Step independiente.
+Formato recomendado:
 
-Separar:
+`Referencia sugerida: [elemento histórico encontrado]. Validar contra el ambiente/documentación actual.`
 
-`Action`
+Ejemplos de elementos que pueden aparecer:
 
-de:
+- `Referencia sugerida: ruta histórica [ruta]. Validar contra el ambiente actual.`
+- `Referencia sugerida: perfil histórico [perfil]. Validar que corresponda al escenario actual.`
+- `Referencia sugerida: navegación histórica [Módulo > Opción > Pantalla]. Validar contra el ambiente actual.`
 
-`Expected`
+## Importante
 
-Ejemplo de estructura:
+La referencia sugerida NO debe reemplazar la descripción funcional.
+
+La Description debe conservar primero el contexto y objetivo de la prueba y después agregar la referencia.
+
+Ejemplo:
+
+`Ingresar al módulo Cotizador Autos Colectivos y acceder a la funcionalidad documentada para validar el comportamiento definido en la HU. Referencia sugerida: la documentación histórica ubica esta funcionalidad en [ruta histórica]. Validar contra el ambiente actual.`
+
+Si no existe una referencia histórica suficientemente confiable:
+
+`No se encontró referencia histórica suficiente.`
+
+No inventar.
+
+---
+
+# 5. REFERENCIA SUGERIDA EN STEPS
+
+Las referencias históricas también deben ayudar a hacer los pasos más exactos.
+
+Cada Step debe conservar:
+
+- Test Step
+- Action
+- Expected
+
+Cuando exista una referencia histórica relevante, incorporarla en la Action o en el Expected de forma claramente identificable.
+
+## Ejemplo
 
 Step 1
-Action: Ingresar al módulo documentado.
-Expected: Se muestra el módulo indicado.
+
+Action:
+`Ingresar al módulo Cotizador Autos Colectivos. Referencia sugerida: ruta histórica "Cotizadores Web > Cotizador Autos Colectivos". Validar contra el ambiente actual.`
+
+Expected:
+`Se muestra el módulo correspondiente, de acuerdo con la funcionalidad documentada.`
 
 Step 2
-Action: Seleccionar la opción documentada.
-Expected: Se muestra la información definida en la HU.
+
+Action:
+`Seleccionar la opción [nombre documentado]. Referencia sugerida: en documentación histórica esta opción se encuentra dentro de [ruta/opción histórica]. Validar contra el ambiente actual.`
+
+Expected:
+`Se presenta la pantalla/opción indicada en la HU.`
 
 Step 3
-Action: Ejecutar la acción funcional indicada.
-Expected: El sistema aplica el comportamiento documentado.
 
-El ejemplo anterior es de estructura y estilo, NO contenido para inventar.
+Action:
+`Ejecutar la acción funcional documentada.`
 
-## Evitar
-
-Un único Step demasiado largo:
-
-`Ingresar, consultar, seleccionar, modificar y guardar...`
-
-## Preferir
-
-Una acción funcional por Step.
-
-No fragmentar artificialmente acciones triviales si no aportan valor de validación.
+Expected:
+`El sistema presenta/aplica el resultado definido en la HU.`
 
 ---
 
-# 7. TRATAMIENTO DE LA FUENTE
+# 6. NO CONFUNDIR REFERENCIA CON DATO CONFIRMADO
 
-Usar como fuente primaria la HU/documentación que se está procesando.
+Nunca escribir una referencia histórica como si fuera un dato confirmado de la HU.
 
-Los proyectos históricos solamente sirven para determinar:
+Incorrecto:
 
-- nivel de detalle;
-- estilo de redacción;
-- granularidad;
-- forma de expresar resultados;
-- estructura de precondiciones;
-- separación Action/Expected.
+`Ingresar por la ruta Cotizadores Web > Producción > Autos.`
 
-No usar proyectos históricos para inventar reglas de negocio de la nueva HU.
+si esa ruta solamente apareció en un proyecto histórico.
+
+Correcto:
+
+`Referencia sugerida: documentación histórica utiliza la ruta Cotizadores Web > Producción > Autos. Validar contra el ambiente actual.`
+
+La palabra `sugerida` debe dejar claro que requiere validación.
 
 ---
 
-# 8. NO INVENCIÓN
+# 7. QUÉ REFERENCIAS PRIORIZAR
 
-No inventar:
+Cuando haya varias referencias históricas, priorizar:
 
-- datos;
+1. Mismo producto.
+2. Mismo módulo.
+3. Misma funcionalidad.
+4. Misma pantalla/opción.
+5. Mismo perfil.
+6. Misma ruta.
+7. Terminología equivalente.
+
+No utilizar referencias de otro contexto si pueden inducir a error.
+
+---
+
+# 8. DESCRIPTION
+
+La Description debe contener:
+
+- contexto;
+- funcionalidad;
+- acción/objetivo;
+- comportamiento que se quiere validar;
+- referencia sugerida, cuando exista.
+
+Evitar:
+
+`Validar que funciona correctamente.`
+
+Preferir una redacción contextual y verificable.
+
+---
+
+# 9. PRECONDICIONES
+
+Extraer de la HU/documentación actual.
+
+Si un histórico aporta una posible precondición pero la HU actual no la confirma:
+
+`Referencia sugerida: [precondición histórica]. Validar antes de ejecutar.`
+
+No presentarla como precondición confirmada.
+
+---
+
+# 10. STEPS
+
+Cada acción funcional principal debe ser un Step independiente.
+
+Evitar pasos como:
+
+`Ingresar, consultar, seleccionar, modificar y guardar.`
+
+Preferir:
+
+1. Ingresar.
+2. Consultar.
+3. Seleccionar.
+4. Modificar.
+5. Guardar.
+
+Cuando exista una referencia histórica, agregarla sin perder la acción principal.
+
+---
+
+# 11. EXPECTED
+
+El Expected debe describir el comportamiento verificable.
+
+Puede incorporar una referencia histórica cuando sea útil:
+
+`Expected: Se muestra la pantalla documentada. Referencia sugerida: históricamente esta pantalla presenta [elemento]. Validar que corresponda a la versión actual.`
+
+No copiar información histórica como comportamiento actual sin confirmación.
+
+---
+
+# 12. NO INVENCIÓN
+
+Nunca inventar:
+
 - usuarios;
 - perfiles;
-- permisos;
-- mensajes;
-- valores;
-- campos;
+- rutas;
+- URLs;
 - botones;
-- navegación;
+- campos;
+- mensajes;
+- permisos;
+- valores;
 - reglas;
-- respuestas;
-- validaciones;
-- resultados;
-- estados;
-- configuraciones.
+- resultados.
 
-Cuando falte información:
+Cuando el histórico tenga un dato potencialmente útil pero la HU actual no lo confirme:
 
-- generar el CP DRAFT sustentado;
-- no completar el vacío con suposiciones;
-- marcar ALERTA;
-- indicar qué información falta.
+- mantenerlo como `Referencia sugerida`;
+- indicar `Validar contra el ambiente actual`;
+- no tratarlo como dato confirmado.
 
 ---
 
-# 9. ESTRUCTURA FUNCIONAL DEL TEST CASE
+# 13. AZURE IMPORT
 
-Mantener la estructura aprobada:
-
-- ID
-- Title
-- Product
-- Module
-- Description
-- Expected Result
-- Preconditions
-- Related Use Case
-- Steps
-  - Step #
-  - Action
-  - Expected value
-- Alerts cuando corresponda
-
-No agregar campos funcionales nuevos al modelo aprobado.
-
----
-
-# 10. AZURE IMPORT
-
-La salida Azure Import debe utilizar exclusivamente el modelo maestro definido para el proyecto:
+Mantener el modelo aprobado:
 
 `TestCaseId`
 `Title`
@@ -298,99 +264,42 @@ La salida Azure Import debe utilizar exclusivamente el modelo maestro definido p
 `Outcome`
 `Comment`
 
-No agregar columnas adicionales a esta hoja.
+No agregar columnas.
 
-Cada Step debe ocupar una fila independiente.
+Cada Step ocupa una fila.
 
-Ejemplo conceptual:
+Las referencias sugeridas pueden aparecer dentro de `StepAction` y/o `StepExpected` cuando corresponda.
 
-| TestCaseId | Title | TestStep | StepAction | StepExpected |
-|---|---|---:|---|---|
-| CP-AC-AUTO-00001 | ... | 1 | Acción 1 | Resultado 1 |
-| CP-AC-AUTO-00001 | ... | 2 | Acción 2 | Resultado 2 |
-| CP-AC-AUTO-00001 | ... | 3 | Acción 3 | Resultado 3 |
-
-El contenido debe conservar el ID QA del proyecto en `TestCaseId`.
-
-No confundir el ID funcional `CP-AC-...` con el Work Item ID numérico que Azure pueda generar posteriormente.
+La información adicional de Description, Product, Module, Preconditions, CU y referencias debe conservarse en la hoja de Datos Adicionales cuando el modelo del proyecto la contemple.
 
 ---
 
-# 11. DATOS ADICIONALES
+# 14. VALIDACIÓN FINAL
 
-Si la estructura aprobada del proyecto contempla una hoja separada `Datos Adicionales`, utilizarla para conservar información que no pertenece a las columnas de Azure Import, incluyendo según corresponda:
+Antes de entregar:
 
-- Product
-- Module
-- Description
-- Expected Result
-- Preconditions
-- Related Use Case
-- Coverage
-- Alerts
-- información de trazabilidad.
+- mínimo 1 CP por CU;
+- exactamente 1 CU por CP;
+- sin relaciones entre funcionalidades;
+- Description contextual;
+- referencia sugerida en Description cuando exista evidencia histórica;
+- referencia sugerida en Steps cuando aporte precisión;
+- Action y Expected separados;
+- Steps ejecutables;
+- referencias claramente marcadas como sugeridas;
+- sin invención;
+- Producto = `Cotizadores Web` para Autos Colectivos;
+- Módulo = `Cotizador Autos Colectivos`;
+- Azure Import sin columnas adicionales.
 
-No modificar la hoja Azure Import para introducir estas columnas.
+## PRINCIPIO
 
----
+Los históricos deben hacer que el agente sea más preciso, NO más inventivo.
 
-# 12. VALIDACIÓN OBLIGATORIA ANTES DE ENTREGAR
+La salida debe distinguir siempre entre:
 
-Antes de generar la salida final comprobar:
+`CONFIRMADO POR LA HU`
 
-### Cobertura
+y
 
-- Todos los CU identificados tienen al menos un CP.
-- Ningún CU quedó sin cobertura.
-
-### Independencia
-
-- Cada CP tiene exactamente un CU.
-- Ningún CP tiene varios CU.
-- No existen relaciones CP → múltiples funcionalidades.
-
-### Calidad
-
-- Description contextual.
-- Expected Result verificable.
-- Preconditions sustentadas.
-- Steps ejecutables.
-- Action y Expected separados.
-- Sin pasos excesivamente agrupados.
-- Sin escenarios artificiales.
-- Sin duplicados.
-
-### Fuente
-
-- Todo comportamiento está sustentado.
-- No se utilizaron ejemplos históricos para inventar funcionalidad.
-- Alertas registradas cuando falte información.
-
-### Catálogo
-
-Para Autos Colectivos:
-
-`Producto = Cotizadores Web`
-
-`Módulo = Cotizador Autos Colectivos`
-
-### Azure
-
-- Azure Import contiene únicamente las columnas aprobadas.
-- Cada Step ocupa una fila.
-- TestCaseId mantiene el ID CP-AC-...
-- No se agregaron columnas nuevas.
-
----
-
-# 13. PRINCIPIO FINAL
-
-El agente debe producir casos que parezcan documentados por un QA que conoce el estándar histórico del equipo:
-
-**claros, ejecutables, verificables, suficientemente detallados y trazables, pero sin inventar ni exagerar.**
-
-La calidad NO se mide por cantidad de CP.
-
-Se mide por:
-
-`Cobertura + precisión + trazabilidad + ejecutabilidad + sustentación documental`.
+`REFERENCIA SUGERIDA — VALIDAR CONTRA EL AMBIENTE ACTUAL`.
