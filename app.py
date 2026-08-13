@@ -203,7 +203,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V34-EDICION-Y-DESCRIPTION-AZURE"
+APP_VERSION = "V35-EDICION-Y-DESCRIPTION-SIN-RUTA-ESTIMADA"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -764,39 +764,30 @@ los datos definidos, aplicación de las reglas y condiciones establecidas, ejecu
 El ejemplo anterior solo define el NIVEL DE DETALLE; los datos concretos siempre
 deben provenir de la documentación fuente.
 
-6. ESTIMADOS CONTROLADOS DE RUTAS Y OPCIONES DE MENÚ
-Cuando el CU no indique de forma explícita la ruta de navegación, menú,
-pantalla u opción exacta, se permite complementar el CP con un estimado
-CONTROLADO si existe evidencia suficiente en el CU/documentación para
-inferir razonablemente la navegación.
+6. OPCIONES POSIBLES DE NAVEGACIÓN SIN INVENTAR RUTAS
+Cuando el CU no indique de forma explícita la navegación, menú, pantalla u opción exacta,
+puedes redactar una **opción posible de acceso o navegación** únicamente si existe
+evidencia suficiente en el CU/documentación para plantearla de forma razonable.
 
-REGLAS PARA LOS ESTIMADOS:
-- Los estimados deben aparecer tanto en la DESCRIPTION como en los STEPS
-  cuando ayuden a hacer el caso ejecutable.
-- En DESCRIPTION usar la etiqueta "Ruta estimada:" o "Navegación sugerida:".
-- En STEPS usar la etiqueta "(Ruta estimada)" o "(Navegación sugerida)".
-- El estimado debe construirse únicamente a partir de módulos, funcionalidades,
-  pantallas u opciones que sí aparezcan en la documentación.
-- Nunca presentar una ruta estimada como si fuera una ruta confirmada.
-- Toda ruta estimada debe generar una alerta/Validation Required para validar
-  la navegación exacta con el equipo funcional.
-- NO inventar nombres específicos de botones, URLs, IDs, pantallas o menús si
-  no tienen sustento en la documentación.
-- Si no existe evidencia suficiente para estimar la ruta, indicar en el Step:
-  "Navegar hasta la funcionalidad indicada en el CU. Ruta exacta no definida
-  en la fuente; validar con equipo funcional."
-- Los estimados son complemento operativo: NO sustituyen ni resumen el detalle
-  real del CU.
+REGLAS PARA LA OPCIÓN POSIBLE:
+- NO utilizar las etiquetas "Ruta estimada", "Navegación sugerida" ni equivalentes.
+- Redactar la opción posible de forma natural dentro de la Description y/o Steps,
+  siempre como una alternativa operativa y no como un dato confirmado.
+- La opción debe basarse exclusivamente en módulos, funcionalidades, pantallas u
+  opciones mencionadas en la documentación.
+- No inventar nombres específicos de botones, URLs, IDs, pantallas, menús, rutas o
+  secuencias que no tengan sustento en la fuente.
+- Si la documentación sí define la navegación, conservarla tal como está sustentada.
+- Si no existe evidencia suficiente para proponer una opción de acceso, redactar el
+  paso de forma funcional, por ejemplo: "Acceder a la funcionalidad indicada en el CU".
+- La opción posible NO debe generar una ruta ficticia ni sustituir el detalle funcional
+  del CU. Debe conservar todas las características, condiciones, reglas, mensajes,
+  datos, validaciones y resultados definidos en la documentación.
 
-EJEMPLO DE DESCRIPTION:
-"Ruta estimada: Cotizadores Web → [módulo/funcionalidad indicada en el CU].
-Validar la ruta exacta con el equipo funcional. El escenario debe conservar
-además el contexto, reglas, datos, condiciones y resultado definidos en el CU."
-
-EJEMPLO DE STEP:
-"(Ruta estimada) Ingresar al módulo y seleccionar la funcionalidad indicada
-en el CU. Validar que se acceda a la funcionalidad correspondiente. La ruta
-exacta de menú debe ser confirmada con el equipo funcional."
+EJEMPLO DE REDACCIÓN:
+"Acceder a la funcionalidad indicada en el CU y seleccionar la opción correspondiente
+para realizar la operación descrita. La ubicación exacta de la opción debe validarse
+con la documentación o el equipo funcional si no está definida en la fuente."
 
 6. EXCEL AZURE — NO CAMBIAR ESTAS REGLAS
 - Un CP debe exportarse como un bloque: una fila de cabecera + todas sus filas de Steps.
@@ -846,9 +837,10 @@ def generate_qa_data(
         "No conviertas Steps en CP. "
         "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
         "debe validarse contra los CU reales identificados en USE_CASES. "
-        "Puedes incluir rutas estimadas tanto en Description como en Steps cuando exista evidencia suficiente; "
-        "deben marcarse como Ruta estimada/Navegación sugerida y generar Validation Required. "
-        "No presentes una ruta estimada como confirmada ni inventes botones, URLs o menús sin sustento.\n"
+        "Cuando la navegación no esté definida explícitamente, puedes redactar una opción posible de acceso "
+        "solo si existe evidencia suficiente en la documentación. No uses las etiquetas Ruta estimada o "
+        "Navegación sugerida, no inventes botones, URLs, menús, pantallas ni rutas, y conserva siempre las "
+        "características funcionales y reglas sustentadas en la fuente.\n"
         "\n\n==================== REGLA DE SALIDA ====================\n"
         "Devuelve exclusivamente JSON válido que cumpla el esquema solicitado. "
         "No agregues explicaciones fuera del JSON."
