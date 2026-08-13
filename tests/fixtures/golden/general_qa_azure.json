@@ -1,0 +1,62 @@
+[
+  [
+    "20001.0",
+    "Inicio de sesion exitoso con credenciales validas",
+    "",
+    "",
+    "",
+    "2001:0",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "1.0",
+    "Ingresar correo y contrasena validos.",
+    "Los campos aceptan el texto ingresado.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "2.0",
+    "Presionar el boton Iniciar sesion.",
+    "El sistema redirige al panel de cuenta.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "20002.0",
+    "Bloqueo de cuenta tras intentos fallidos",
+    "",
+    "",
+    "",
+    "2002:0",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "1.0",
+    "Ingresar contrasena incorrecta 5 veces consecutivas.",
+    "El sistema rechaza cada intento con un mensaje de error generico.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ]
+]

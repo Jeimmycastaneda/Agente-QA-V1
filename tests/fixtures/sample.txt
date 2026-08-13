@@ -1,0 +1,7 @@
+Historia de Usuario: Como usuario registrado quiero iniciar sesion con mi correo
+y contrasena para acceder a mi panel de cuenta.
+
+Criterios de aceptacion:
+- El sistema debe validar formato de correo electronico.
+- El sistema debe bloquear la cuenta tras 5 intentos fallidos.
+- El sistema debe mostrar un mensaje de error generico ante credenciales invalidas.

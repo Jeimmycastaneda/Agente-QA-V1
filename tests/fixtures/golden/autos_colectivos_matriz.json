@@ -1,0 +1,30 @@
+[
+  [
+    "CP-AC-LOGIN-00001",
+    "Inicio de sesion exitoso con credenciales validas",
+    "Autenticacion de usuario",
+    "Autenticacion valida",
+    "Login exitoso",
+    "Positivo",
+    "Validar que un usuario registrado pueda iniciar sesion con correo y contrasena validos.",
+    "El usuario tiene una cuenta activa registrada.",
+    "UI",
+    "Completa",
+    "Politica de contrasenas no documentada: La fuente no especifica requisitos minimos de la contrasena.",
+    "Bajo"
+  ],
+  [
+    "CP-AC-LOGIN-00002",
+    "Bloqueo de cuenta tras intentos fallidos",
+    "Autenticacion de usuario",
+    "Bloqueo por intentos fallidos",
+    "Bloqueo tras 5 intentos",
+    "Negativo",
+    "Validar que la cuenta se bloquee tras 5 intentos fallidos de inicio de sesion.",
+    "El usuario tiene una cuenta activa registrada.",
+    "BD",
+    "Parcial",
+    "Tiempo de bloqueo no especificado: La fuente no indica cuanto dura el bloqueo de la cuenta. | Validación: Confirmar con el equipo funcional.",
+    "Medio"
+  ]
+]

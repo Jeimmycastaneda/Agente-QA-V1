@@ -3,8 +3,9 @@
 Mini aplicación web para analizar Historias de Usuario y documentos asociados con Gemini, revisar/editar casos de prueba y exportar Excel/PDF.
 
 ## Archivos
-- app.py
-- prompt_qa.txt
+- app.py — entrypoint de Streamlit
+- agente_qa/ — lógica de la app (config, extracción, generación, export, UI)
+- prompts/ — prompts QA en Markdown, editables desde la interfaz
 - requirements.txt
 
 ## Configuración

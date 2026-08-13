@@ -1,0 +1,28 @@
+# CONTRATO APROBADO CON AZURE DEVOPS — NO RENOMBRAR NI REORDENAR.
+# El loader falla si azure_columns difiere del default salvo allow_override: true.
+version: 1
+allow_override: false
+azure_columns:
+  - TestCaseId
+  - Title
+  - TestStep
+  - StepAction
+  - StepExpected
+  - TestPointId
+  - Configuration
+  - Tester
+  - Outcome
+  - Comment
+matriz_columns:
+  - TestCaseId
+  - Title
+  - Requirement / Use Case
+  - Criterion
+  - Scenario
+  - Scenario Type
+  - Description
+  - Preconditions
+  - Validation Method
+  - Coverage
+  - Alerts
+  - Effort

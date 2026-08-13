@@ -1,0 +1,62 @@
+[
+  [
+    "28454.0",
+    "Inicio de sesion exitoso con credenciales validas",
+    "",
+    "",
+    "",
+    "6552:0",
+    "Default configuration created @ 26/05/2023 15:22:17",
+    "Isabel Cristina Mejía López",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "1.0",
+    "Ingresar correo y contrasena validos.",
+    "Los campos aceptan el texto ingresado.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "2.0",
+    "Presionar el boton Iniciar sesion.",
+    "El sistema redirige al panel de cuenta.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  [
+    "28455.0",
+    "Bloqueo de cuenta tras intentos fallidos",
+    "",
+    "",
+    "",
+    "6553:0",
+    "Default configuration created @ 26/05/2023 15:22:17",
+    "Isabel Cristina Mejía López",
+    "",
+    ""
+  ],
+  [
+    "",
+    "",
+    "1.0",
+    "Ingresar contrasena incorrecta 5 veces consecutivas.",
+    "El sistema rechaza cada intento con un mensaje de error generico.",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ]
+]
