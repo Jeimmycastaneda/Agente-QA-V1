@@ -402,6 +402,68 @@ def normalize_validation_method(value):
     return mapping.get(v, safe_text(value, "Pendiente"))
 
 
+
+def build_azure_description(product, module, description, expected, preconditions, related_use_case):
+    """Construye la estructura aprobada de Description para Azure sin inventar datos."""
+    desc = safe_text(description)
+    desc = re.sub(r"(?mi)^\s*Descripción:\s*", "", desc, count=1).strip()
+    return (
+        f"Producto: {safe_text(product, 'Pendiente')}\n\n"
+        f"Módulo: {safe_text(module, 'Pendiente')}\n\n"
+        f"Descripción: {desc or 'Pendiente'}\n\n"
+        f"Resultado esperado de la prueba: {safe_text(expected, 'Pendiente')}\n\n"
+        f"Precondiciones: {safe_text(preconditions, 'Pendiente')}\n\n"
+        f"Caso de uso relacionado: {safe_text(related_use_case, 'Pendiente')}"
+    )
+
+
+def format_description_for_azure(description):
+    """Formatea Description como Markdown legible en Azure DevOps sin cambiar su contenido.
+
+    Solo transforma presentación: separa bloques, resalta etiquetas y normaliza listas.
+    No agrega ni elimina información funcional.
+    """
+    text = safe_text(description).replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+
+    # Normaliza espacios/tabs sin destruir saltos de línea.
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # Si el modelo dejó las etiquetas pegadas en una sola línea, las separamos.
+    labels = [
+        "Producto:",
+        "Módulo:",
+        "Descripción:",
+        "Resultado esperado de la prueba:",
+        "Precondiciones:",
+        "Caso de uso relacionado:",
+    ]
+    for label in labels:
+        text = re.sub(rf"\s*{re.escape(label)}\s*", f"\\n{label} ", text, count=1)
+
+    # Normaliza viñetas comunes provenientes del modelo.
+    text = re.sub(r"(?m)^\s*[•●▪◦]\s*", "- ", text)
+    text = re.sub(r"(?m)^\s*[o]\s+", "- ", text)
+    text = re.sub(r"\n\s*[-–—]\s*", "\n- ", text)
+
+    # Si hay bullets pegados después de una oración, sepáralos.
+    text = re.sub(r"\s+(-\s+)", r"\n\1", text)
+
+    # Limpieza de saltos excesivos.
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    # Resalta únicamente las etiquetas de los seis bloques aprobados.
+    for label in labels:
+        text = re.sub(rf"(?m)^{re.escape(label)}\s*", f"**{label}** ", text)
+
+    # Deja una separación visual consistente entre bloques principales.
+    for label in labels[1:]:
+        text = re.sub(rf"\n\*\*{re.escape(label)}\*\*", f"\n\n**{label}**", text)
+    text = re.sub(r"^\*\*Producto:\*\*", "**Producto:**", text)
+
+    return text.strip()
+
 def module_token(module, title="", scenario=""):
     raw = safe_text(module) or safe_text(title) or safe_text(scenario) or "GENERAL"
     raw = re.sub(r"[^A-Za-z0-9]+", " ", raw).strip().upper()
@@ -990,9 +1052,20 @@ def create_excel(data, config_key):
         # Conservamos nuestro identificador funcional en el título.
         title = f"{case_id} - {title_base}" if not title_base.startswith(case_id) else title_base
 
-        description = safe_text(tc.get("Description"))
+        # Description siempre se exporta con la estructura completa aprobada.
+        raw_description = safe_text(tc.get("Description"), safe_text(tc.get("Scenario")))
         preconditions = safe_text(tc.get("Preconditions"))
-        scenario = safe_text(tc.get("Scenario"), description)
+        scenario = safe_text(tc.get("Scenario"), raw_description)
+        description = format_description_for_azure(
+            build_azure_description(
+                product=safe_text(tc.get("Product"), data.get("PRODUCT"), "Pendiente"),
+                module=module or "Pendiente",
+                description=raw_description,
+                expected=safe_text(tc.get("Expected Result"), tc.get("ExpectedResult"), tc.get("Resultado esperado de la prueba"), "Pendiente"),
+                preconditions=preconditions or "Pendiente",
+                related_use_case=safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase"), tc.get("Caso de uso relacionado"), "Pendiente")
+            )
+        )
         steps = safe_steps(tc)
 
         coverage = find_coverage(data, tc)
