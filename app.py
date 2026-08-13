@@ -203,7 +203,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V31-AZURE-CU-COVERAGE-GEMINI-FALLBACK"
+APP_VERSION = "V34-EDICION-Y-DESCRIPTION-AZURE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1822,9 +1822,17 @@ if result:
             "🚫 Descargas deshabilitadas: la cobertura mínima por CU no se cumple."
         )
 
+    # IMPORTANTE: el Excel se reconstruye SIEMPRE con el estado actual de
+    # `result`, después de aplicar cualquier edición realizada en el editor.
+    # Así, cambios en Description, Preconditions, Steps, Expected, Related CU,
+    # etc. quedan reflejados en el archivo descargado. No se reutiliza una
+    # copia anterior de session_state.excel_data que pudiera quedar desactualizada.
+    current_excel_data = create_excel(result, selected_config)
+    st.session_state.excel_data = current_excel_data
+
     st.download_button(
         "📊 Descargar Excel",
-        data=st.session_state.excel_data,
+        data=current_excel_data,
         file_name=(
             f"QA_DRAFT_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         ),
