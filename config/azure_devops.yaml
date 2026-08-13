@@ -1,7 +1,7 @@
 version: 1
-enabled: false
-organization_url: "https://dev.azure.com/<org>"
-project: ""
+enabled: true
+organization_url: "https://dev.azure.com/asulsas"
+project: "Produccion ASUL"
 area_path: ""
 iteration_path: ""
 api_version: "7.1"
