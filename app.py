@@ -712,6 +712,22 @@ cuando exista en la fuente:
 Si para que el CP sea autónomo y ejecutable es necesario incorporar el contenido
 completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
 
+2A. ESTRUCTURA OBLIGATORIA DE LA DESCRIPTION PARA AZURE DEVOPS
+- La columna Description del Excel Azure Import debe contener la descripción funcional completa del CP; NO debe ser una descripción corta ni un resumen del CU.
+- La Description debe conservar, cuando exista información en la fuente, el detalle funcional necesario para que el Test Case sea autosuficiente en Azure DevOps.
+- La Description debe presentar obligatoriamente, en este orden, estos bloques: Producto, Módulo, Descripción, Resultado esperado de la prueba, Precondiciones y Caso de uso relacionado.
+- Producto: usar el producto identificado en la documentación.
+- Módulo: usar el módulo/funcionalidad correspondiente al CU.
+- Descripción: incluir el contexto funcional completo del escenario, usuarios/perfiles, navegación o funcionalidad, datos/campos, reglas de negocio, condiciones, mensajes, secciones, validaciones, restricciones y cualquier otro detalle explícito relevante del CU.
+- Resultado esperado de la prueba: indicar el resultado funcional que debe obtenerse al ejecutar y validar el escenario.
+- Precondiciones: conservar las precondiciones explícitas de la fuente y las necesarias para ejecutar el escenario cuando estén sustentadas. No inventar precondiciones.
+- Caso de uso relacionado: incluir el ID del CU y su nombre cuando esté disponible.
+- Si el CU contiene listas, condiciones, mensajes, nombres de secciones, reglas o referencias a otros CU relevantes para el escenario, conservarlos dentro de Description; no eliminarlos por resumir.
+- La Description debe ser específica para el CP y compatible con sus Steps, pero debe conservar el contexto completo necesario del CU.
+- No crear una Description genérica como "Validar que el sistema permita...", "Validar la funcionalidad...", "Validar el flujo..." o equivalentes.
+- No inventar contenido para completar Producto, Módulo, Resultado esperado, Precondiciones o Caso de uso relacionado. Si un dato no está definido en la fuente, indicarlo como pendiente/por validar según las reglas de no invención.
+- La Description debe poder pegarse/importarse directamente en el campo Description de Azure DevOps y conservar saltos de línea, listas y jerarquía funcional cuando sea posible.
+
 3. PASOS COMPLETOS Y EJECUTABLES
 - Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
 - Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
