@@ -360,12 +360,25 @@ SCHEMA = {
 }
 
 
-def safe_text(value, default=""):
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False)
-    return str(value).strip()
+def safe_text(value, default="", *fallbacks):
+    """Convierte valores a texto y permite una cadena de valores de respaldo.
+
+    Se mantiene compatible con el uso anterior de safe_text(value, default),
+    y además permite safe_text(valor1, valor2, valor3, ...), tomando el
+    primer valor no vacío. Esto evita errores cuando la generación combina
+    campos alternativos de la fuente.
+    """
+    candidates = (value, default, *fallbacks)
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if isinstance(candidate, (dict, list)):
+            text = json.dumps(candidate, ensure_ascii=False).strip()
+        else:
+            text = str(candidate).strip()
+        if text:
+            return text
+    return ""
 
 
 def safe_steps(tc):
@@ -1058,12 +1071,12 @@ def create_excel(data, config_key):
         scenario = safe_text(tc.get("Scenario"), raw_description)
         description = format_description_for_azure(
             build_azure_description(
-                product=safe_text(tc.get("Product"), data.get("PRODUCT"), "Pendiente"),
+                product=safe_text(safe_text(tc.get("Product"), data.get("PRODUCT")), "Pendiente"),
                 module=module or "Pendiente",
                 description=raw_description,
-                expected=safe_text(tc.get("Expected Result"), tc.get("ExpectedResult"), tc.get("Resultado esperado de la prueba"), "Pendiente"),
+                expected=safe_text(safe_text(safe_text(tc.get("Expected Result"), tc.get("ExpectedResult")), tc.get("Resultado esperado de la prueba")), "Pendiente"),
                 preconditions=preconditions or "Pendiente",
-                related_use_case=safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase"), tc.get("Caso de uso relacionado"), "Pendiente")
+                related_use_case=safe_text(safe_text(safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase")), tc.get("Caso de uso relacionado")), "Pendiente")
             )
         )
         steps = safe_steps(tc)
