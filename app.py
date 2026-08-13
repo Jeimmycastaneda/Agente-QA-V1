@@ -216,7 +216,7 @@ FALLBACK_MODELS = [
 # Columnas EXACTAS requeridas por Azure DevOps Test Plans para importación XLSX.
 # Para casos nuevos, ID queda vacío. Cada step es una fila y repite los campos del CP y establece Tipo Origen Proyecto = Proyecto.
 AZURE_COLUMNS = [
-    "ID", "Work Item Type", "Title", "Test Step", "Step Action",
+    "ID", "Work Item Type", "Title", "Description", "Test Step", "Step Action",
     "Step Expected", "Area Path", "IDPadre", "Tipo Origen Proyecto",
     "Tiempo Real", "Assigned To", "State"
 ]
@@ -1040,6 +1040,7 @@ def create_excel(data, config_key):
             "ID": "",
             "Work Item Type": work_item_type,
             "Title": title,
+            "Description": description,
             "Test Step": "",
             "Step Action": "",
             "Step Expected": "",
@@ -1057,6 +1058,7 @@ def create_excel(data, config_key):
                 "ID": "",
                 "Work Item Type": "",
                 "Title": "",
+                "Description": "",
                 "Test Step": step.get("Step #", step_index),
                 "Step Action": safe_text(
                     step.get("Action"),
