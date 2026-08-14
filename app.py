@@ -3027,12 +3027,19 @@ if result:
         )
         if selected_publish_ids and target_plan and target_suite and not safe_text(st.session_state.get("azure_id_padre")):
             st.warning("⚠️ Falta IDPadre. La creación queda bloqueada porque Azure lo exige.")
-        if ready:
-            st.success(
-                f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
-                f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
-                f"CP seleccionados: {len(selected_publish_ids)}"
-            )
+        if selected_publish_ids and target_plan and target_suite:
+            if ready:
+                st.success(
+                    f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
+                    f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
+                    f"CP seleccionados: {len(selected_publish_ids)}"
+                )
+            else:
+                st.info(
+                    f"Destino seleccionado: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
+                    f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
+                    f"CP seleccionados: {len(selected_publish_ids)}. Revisa los datos obligatorios para habilitar la sincronización."
+                )
 
             st.markdown("### 2️⃣ Revisar y confirmar creación")
             review_rows = []
@@ -3046,26 +3053,54 @@ if result:
                 })
             st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
             st.warning(
-                "⚠️ Este botón sí modifica Azure DevOps: crea los Test Cases y los asocia a la Suite seleccionada."
+                "⚠️ La sincronización modifica Azure DevOps: crea los Test Cases y los asocia a la Suite seleccionada."
             )
+
+            # El botón se muestra siempre que exista una selección y un destino.
+            # Si falta un dato obligatorio o hay duplicados, queda bloqueado en vez de desaparecer.
+            can_sync = bool(
+                selected_publish_ids
+                and target_plan
+                and target_suite
+                and not duplicate_titles
+                and safe_text(st.session_state.get("azure_id_padre"))
+                and safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
+            )
+            if not safe_text(st.session_state.get("azure_id_padre")):
+                st.warning("⚠️ Completa IDPadre para habilitar la sincronización.")
+            if duplicate_titles:
+                st.error("🚫 La sincronización está bloqueada porque existen CP con títulos duplicados en la Suite destino.")
+            if not target_suite:
+                st.warning("⚠️ Selecciona una Suite destino para habilitar la sincronización.")
+
             confirm = st.checkbox(
-                "Confirmo que los CP, Test Plan y Suite son correctos y autorizo la creación en Azure.",
+                "Confirmo que los CP, Test Plan, Suite, IDPadre y Tipo Origen Proyecto son correctos y autorizo la creación en Azure.",
                 key="azure_publish_confirm",
             )
             if st.button(
-                "🟢 Confirmar y crear en Azure DevOps",
+                "🔄 Sincronizar con Azure DevOps",
                 type="primary",
-                disabled=not confirm,
+                disabled=not (can_sync and confirm),
                 key="azure_publish_execute",
+                help="Crea los CP seleccionados en Azure y los asocia a la Suite elegida.",
             ):
                 try:
-                    selected_cases = [publish_case_map[cp_id] for cp_id in selected_publish_ids]
-                    with st.spinner(f"Creando {len(selected_cases)} Test Case(s) y asociándolos a la Suite..."):
+                    selected_cases = []
+                    id_padre = safe_text(st.session_state.get("azure_id_padre"))
+                    tipo_origen = safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
+                    for cp_id in selected_publish_ids:
+                        # Copia el CP para no alterar la estructura original de la revisión.
+                        tc = dict(publish_case_map[cp_id])
+                        # Azure exige estos campos personalizados en el Work Item.
+                        tc["IDPadre"] = id_padre
+                        tc["Tipo Origen Proyecto"] = tipo_origen
+                        selected_cases.append(tc)
+                    with st.spinner(f"Sincronizando {len(selected_cases)} Test Case(s) con Azure DevOps..."):
                         publish_result = create_selected_cases_in_azure(selected_cases, target_plan, target_suite)
                     st.session_state.azure_publish_results = publish_result
                     st.rerun()
                 except Exception as exc:
-                    st.error(f"❌ No se pudo completar la creación en Azure: {exc}")
+                    st.error(f"❌ No se pudo completar la sincronización con Azure: {exc}")
 
     publish_result = st.session_state.get("azure_publish_results")
     if publish_result:
