@@ -11,15 +11,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
-from azure_devops import (
-    AzureDevOpsError,
-    get_test_case_detail,
-    get_test_plan,
-    list_test_cases,
-    list_test_plans,
-    list_test_suites,
-    test_connection,
-)
+from azure_devops import (AzureDevOpsError, test_connection, list_test_plans, get_test_plan, list_test_suites, list_test_cases, get_test_case_detail, compare_test_case_structure)
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1606,22 +1598,6 @@ if "excel_data" not in st.session_state:
     st.session_state.excel_data = None
 if "pdf_data" not in st.session_state:
     st.session_state.pdf_data = None
-if "azure_test_plans" not in st.session_state:
-    st.session_state.azure_test_plans = []
-if "azure_selected_test_plan_id" not in st.session_state:
-    st.session_state.azure_selected_test_plan_id = None
-if "azure_selected_test_plan_detail" not in st.session_state:
-    st.session_state.azure_selected_test_plan_detail = None
-if "azure_test_suites" not in st.session_state:
-    st.session_state.azure_test_suites = []
-if "azure_selected_test_suite_id" not in st.session_state:
-    st.session_state.azure_selected_test_suite_id = None
-if "azure_test_cases" not in st.session_state:
-    st.session_state.azure_test_cases = []
-if "azure_selected_test_case_id" not in st.session_state:
-    st.session_state.azure_selected_test_case_id = None
-if "azure_selected_test_case_detail" not in st.session_state:
-    st.session_state.azure_selected_test_case_detail = None
 
 st.title(f"🤖 Agente QA {APP_VERSION} — Generador de Casos de Prueba")
 st.caption(
@@ -1692,272 +1668,103 @@ with st.sidebar:
         except Exception as exc:
             st.error(f"❌ Error inesperado al probar Azure DevOps: {exc}")
 
-    st.markdown("### 📋 Test Plans")
-    st.caption(
-        "Consulta de solo lectura. Se muestran únicamente los 10 Test Plans más recientes "
-        "por ID, usando una sola consulta al listado de Test Plans. No crea, edita ni elimina "
-        "Test Plans, Suites, Test Cases ni Work Items."
-    )
-    if st.button("📋 Consultar Test Plans", key="azure_list_test_plans"):
+
+
+# ============================================================
+# AZURE DEVOPS — REFERENCIA DE ESTRUCTURA (SOLO LECTURA)
+# Hasta comparar un Test Case real. SIN escritura.
+# ============================================================
+st.divider()
+st.subheader("🔎 Referencia de Test Case en Azure")
+st.caption("Selecciona un Test Plan, una Suite y un Test Case existente para comparar su estructura. Esta etapa es solo lectura.")
+
+if "az_ref_plans" not in st.session_state: st.session_state.az_ref_plans = []
+if "az_ref_suites" not in st.session_state: st.session_state.az_ref_suites = []
+if "az_ref_cases" not in st.session_state: st.session_state.az_ref_cases = []
+if "az_ref_detail" not in st.session_state: st.session_state.az_ref_detail = None
+
+if st.button("📋 Consultar 10 Test Plans", key="az_ref_plans_btn"):
+    try:
+        with st.spinner("Consultando los 10 Test Plans más recientes..."):
+            response = list_test_plans(limit=10)
+        st.session_state.az_ref_plans = response.get("plans", [])
+        st.session_state.az_ref_suites = []
+        st.session_state.az_ref_cases = []
+        st.session_state.az_ref_detail = None
+        st.success(f"✅ {len(st.session_state.az_ref_plans)} Test Plans consultados. Solo GET.")
+    except Exception as exc:
+        st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
+
+plans = st.session_state.az_ref_plans
+if plans:
+    plan_labels = [f"{p.get('id')} — {p.get('name','')}" for p in plans]
+    selected_plan_label = st.selectbox("1️⃣ Selecciona un Test Plan", plan_labels, key="az_ref_plan_select")
+    selected_plan = plans[plan_labels.index(selected_plan_label)]
+    if st.button("🔎 Consultar Suites del Test Plan", key="az_ref_suites_btn"):
         try:
-            with st.spinner("Consultando Test Plans de Azure DevOps..."):
-                plans_result = list_test_plans()
-            st.session_state.azure_test_plans = plans_result.get("plans", [])
-            st.session_state.azure_selected_test_plan_detail = None
-            st.session_state.azure_test_suites = []
-            st.session_state.azure_selected_test_suite_id = None
-            st.session_state.azure_test_cases = []
-            st.session_state.azure_selected_test_case_id = None
-            st.session_state.azure_selected_test_case_detail = None
-            st.success(
-                f"✅ Consulta correcta: {plans_result['count']} Test Plan(s) mostrados."
-            )
-        except AzureDevOpsError as exc:
-            st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
+            with st.spinner("Consultando Suites..."):
+                st.session_state.az_ref_suites = list_test_suites(selected_plan.get("id"))
+            st.session_state.az_ref_cases = []
+            st.session_state.az_ref_detail = None
+            st.success(f"✅ {len(st.session_state.az_ref_suites)} Suite(s) encontradas. Solo GET.")
         except Exception as exc:
-            st.error(f"❌ Error inesperado al consultar Test Plans: {exc}")
+            st.error(f"❌ No se pudieron consultar las Suites: {exc}")
 
-    plans = st.session_state.azure_test_plans
-    if plans:
-        plans_df = pd.DataFrame(plans)
-        st.dataframe(plans_df, width="stretch", hide_index=True)
+suites = st.session_state.az_ref_suites
+if suites:
+    suite_labels = [f"{s.get('id')} — {s.get('name','')}" for s in suites]
+    selected_suite_label = st.selectbox("2️⃣ Selecciona una Suite", suite_labels, key="az_ref_suite_select")
+    selected_suite = suites[suite_labels.index(selected_suite_label)]
+    if st.button("🧪 Consultar Test Cases de la Suite", key="az_ref_cases_btn"):
+        try:
+            with st.spinner("Consultando Test Cases..."):
+                st.session_state.az_ref_cases = list_test_cases(selected_plan.get("id"), selected_suite.get("id"))
+            st.session_state.az_ref_detail = None
+            st.success(f"✅ {len(st.session_state.az_ref_cases)} Test Case(s) encontrados. Solo GET.")
+        except Exception as exc:
+            st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
 
-        plan_options = {
-            f"{plan.get('id')} — {plan.get('name', '')}": plan.get('id')
-            for plan in plans
-        }
-        st.caption(
-            "🔎 Test Plan de referencia: selecciona OTRO Test Plan si el actual "
-            "contiene casos mal creados. Esta exploración es solo de lectura."
-        )
-        selected_plan_label = st.selectbox(
-            "📌 Selecciona el Test Plan que quieres tomar como ejemplo",
-            list(plan_options.keys()),
-            key="azure_selected_test_plan",
-        )
-        new_plan_id = plan_options[selected_plan_label]
-        previous_plan_id = st.session_state.get("azure_selected_test_plan_id")
-        if previous_plan_id != new_plan_id:
-            # Al cambiar de Test Plan, se limpian los datos dependientes para
-            # evitar mezclar Suites/Test Cases del plan anterior con el nuevo.
-            st.session_state.azure_selected_test_plan_id = new_plan_id
-            st.session_state.azure_selected_test_plan_detail = None
-            st.session_state.azure_test_suites = []
-            st.session_state.azure_selected_test_suite_id = None
-            st.session_state.azure_test_cases = []
+cases = st.session_state.az_ref_cases
+if cases:
+    case_labels = [f"{c.get('id')} — {c.get('title','')}" for c in cases]
+    selected_case_label = st.selectbox("3️⃣ Selecciona el Test Case de referencia", case_labels, key="az_ref_case_select")
+    selected_az_case = cases[case_labels.index(selected_case_label)]
+    if st.button("🔬 Consultar y comparar estructura", key="az_ref_compare_btn"):
+        try:
+            with st.spinner("Consultando detalle y comparando estructura..."):
+                detail = get_test_case_detail(selected_az_case.get("id"))
+                comparison = compare_test_case_structure(detail)
+            st.session_state.az_ref_detail = {"detail": detail, "comparison": comparison}
+            st.success("✅ Comparación realizada. Solo GET. El flujo se detiene aquí.")
+        except Exception as exc:
+            st.error(f"❌ No se pudo consultar el detalle: {exc}")
 
-        if st.button(
-            "🔎 Consultar Test Plan seleccionado",
-            key="azure_get_selected_test_plan",
-        ):
-            try:
-                selected_plan_id = st.session_state.azure_selected_test_plan_id
-                with st.spinner("Consultando el Test Plan seleccionado..."):
-                    selected_plan_result = get_test_plan(selected_plan_id)
-                st.session_state.azure_selected_test_plan_detail = selected_plan_result["plan"]
-            except AzureDevOpsError as exc:
-                st.error(f"❌ No se pudo consultar el Test Plan seleccionado: {exc}")
-            except Exception as exc:
-                st.error(f"❌ Error inesperado al consultar el Test Plan: {exc}")
-
-        detail = st.session_state.azure_selected_test_plan_detail
-        if detail:
-            st.success(
-                f"✅ Test Plan consultado: {detail.get('id')} — {detail.get('name', '')}"
-            )
-            st.dataframe(pd.DataFrame([detail]), width="stretch", hide_index=True)
-            st.info(
-                "Consulta del Test Plan correcta. Solo se realizó una consulta GET "
-                "sobre el Test Plan seleccionado; no se creó, modificó ni eliminó "
-                "ningún recurso."
-            )
-
-        st.markdown("### 🗂️ Suites del Test Plan")
-        st.caption(
-            "Consulta de solo lectura. Se consulta únicamente la Suite del Test Plan seleccionado. "
-            "No crea, edita ni elimina Suites, Test Cases ni Work Items."
-        )
-        if st.button(
-            "🗂️ Consultar Suites del Test Plan seleccionado",
-            key="azure_list_test_suites",
-        ):
-            try:
-                selected_plan_id = st.session_state.azure_selected_test_plan_id
-                with st.spinner("Consultando Suites del Test Plan seleccionado..."):
-                    suites_result = list_test_suites(selected_plan_id)
-                st.session_state.azure_test_suites = suites_result.get("suites", [])
-                st.session_state.azure_selected_test_suite_id = None
-                st.session_state.azure_test_cases = []
-                st.success(
-                    f"✅ Consulta correcta: {suites_result['count']} Suite(s) mostradas."
-                )
-            except AzureDevOpsError as exc:
-                st.error(f"❌ No se pudieron consultar las Suites: {exc}")
-            except Exception as exc:
-                st.error(f"❌ Error inesperado al consultar Suites: {exc}")
-
-        suites = st.session_state.azure_test_suites
-        if suites:
-            suites_df = pd.DataFrame(suites)
-            st.dataframe(suites_df, width="stretch", hide_index=True)
-
-            suite_options = {
-                f"{suite.get('id')} — {suite.get('name', '')}": suite.get('id')
-                for suite in suites
-            }
-            selected_suite_label = st.selectbox(
-                "📌 Selecciona una Suite para consultar sus Test Cases",
-                list(suite_options.keys()),
-                key="azure_selected_test_suite",
-            )
-            new_suite_id = suite_options[selected_suite_label]
-            previous_suite_id = st.session_state.get("azure_selected_test_suite_id")
-            if previous_suite_id != new_suite_id:
-                # Al cambiar de Suite, no conservamos los Test Cases de la
-                # Suite anterior para evitar mezclar referencias.
-                st.session_state.azure_selected_test_suite_id = new_suite_id
-                st.session_state.azure_test_cases = []
-                st.session_state.azure_selected_test_case_id = None
-                st.session_state.azure_selected_test_case_detail = None
-
-            if st.button(
-                "🔎 Consultar Test Cases de la Suite seleccionada",
-                key="azure_list_test_cases",
-            ):
-                try:
-                    selected_plan_id = st.session_state.azure_selected_test_plan_id
-                    selected_suite_id = st.session_state.azure_selected_test_suite_id
-                    with st.spinner("Consultando Test Cases de la Suite seleccionada..."):
-                        cases_result = list_test_cases(selected_plan_id, selected_suite_id)
-                    st.session_state.azure_test_cases = cases_result.get("test_cases", [])
-                    st.success(
-                        f"✅ Consulta correcta: {cases_result['count']} Test Case(s) mostrados."
-                    )
-                except AzureDevOpsError as exc:
-                    st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
-                except Exception as exc:
-                    st.error(f"❌ Error inesperado al consultar Test Cases: {exc}")
-
-            test_cases = st.session_state.azure_test_cases
-            if test_cases:
-                st.dataframe(pd.DataFrame(test_cases), width="stretch", hide_index=True)
-                st.info(
-                    "Consulta de Test Cases correcta. Solo se realizó una consulta GET sobre "
-                    "la Suite seleccionada; no se creó, modificó ni eliminó ningún recurso."
-                )
-
-                st.markdown("### 🔍 Comparación del Test Case de referencia")
-                st.caption(
-                    "Este es el último paso antes de cualquier futura creación. "
-                    "Aquí solo leemos un Test Case existente para comparar su estructura "
-                    "con el formato aprobado del Agente QA. Todavía NO se crea ningún CP."
-                )
-                case_options = {
-                    f"{case.get('id')} — {case.get('name', '')}": case.get('id')
-                    for case in test_cases
-                    if case.get('id')
-                }
-                if case_options:
-                    selected_case_label = st.selectbox(
-                        "📌 Selecciona el Test Case que quieres tomar como referencia",
-                        list(case_options.keys()),
-                        key="azure_selected_test_case",
-                    )
-                    new_case_id = case_options[selected_case_label]
-                    previous_case_id = st.session_state.get("azure_selected_test_case_id")
-                    if previous_case_id != new_case_id:
-                        st.session_state.azure_selected_test_case_id = new_case_id
-                        st.session_state.azure_selected_test_case_detail = None
-
-                    if st.button(
-                        "🔎 Consultar detalle del Test Case para comparar",
-                        key="azure_get_test_case_detail",
-                    ):
-                        try:
-                            selected_case_id = st.session_state.azure_selected_test_case_id
-                            with st.spinner("Consultando detalle del Test Case..."):
-                                case_detail_result = get_test_case_detail(selected_case_id)
-                            st.session_state.azure_selected_test_case_detail = case_detail_result["test_case"]
-                        except AzureDevOpsError as exc:
-                            st.error(f"❌ No se pudo consultar el Test Case: {exc}")
-                        except Exception as exc:
-                            st.error(f"❌ Error inesperado al consultar el Test Case: {exc}")
-
-                    case_detail = st.session_state.get("azure_selected_test_case_detail")
-                    if case_detail:
-                        st.success(
-                            f"✅ Test Case consultado: {case_detail.get('id')} — "
-                            f"{case_detail.get('title', '')}"
-                        )
-                        st.markdown("#### Información base de Azure")
-                        st.dataframe(
-                            pd.DataFrame([{
-                                "id": case_detail.get("id"),
-                                "title": case_detail.get("title", ""),
-                                "state": case_detail.get("state", ""),
-                                "area_path": case_detail.get("area_path", ""),
-                                "iteration_path": case_detail.get("iteration_path", ""),
-                                "priority": case_detail.get("priority", ""),
-                            }]),
-                            width="stretch",
-                            hide_index=True,
-                        )
-
-                        st.markdown("#### 📝 Description")
-                        st.text_area(
-                            "Contenido leído desde Azure",
-                            value=case_detail.get("description_text", ""),
-                            height=180,
-                            disabled=True,
-                            key="azure_reference_description",
-                        )
-
-                        st.markdown("#### 🔐 Preconditions")
-                        st.text_area(
-                            "Contenido leído desde Azure",
-                            value=case_detail.get("preconditions_text", ""),
-                            height=140,
-                            disabled=True,
-                            key="azure_reference_preconditions",
-                        )
-
-                        st.markdown("#### 👣 Steps")
-                        st.text_area(
-                            "Contenido leído desde Azure",
-                            value=case_detail.get("steps_text", ""),
-                            height=240,
-                            disabled=True,
-                            key="azure_reference_steps",
-                        )
-
-                        required_structure = {
-                            "ID / Title": bool(case_detail.get("title")),
-                            "Description": bool(case_detail.get("description_text")),
-                            "Preconditions": bool(case_detail.get("preconditions_text")),
-                            "Steps": bool(case_detail.get("steps_text")),
-                        }
-                        comparison_df = pd.DataFrame([
-                            {"Elemento": key, "Presente en Test Case de referencia": "Sí" if value else "No"}
-                            for key, value in required_structure.items()
-                        ])
-                        st.markdown("#### 📊 Comparación estructural preliminar")
-                        st.dataframe(comparison_df, width="stretch", hide_index=True)
-                        st.warning(
-                            "🛑 PUNTO DE CONTROL: aquí termina esta etapa. El Test Case "
-                            "solo se está usando como referencia. No existe todavía ninguna "
-                            "acción de creación, actualización o eliminación. Después de "
-                            "comparar este ejemplo definiremos la carga del nuevo CP, pero "
-                            "no se enviará a Azure automáticamente."
-                        )
-            elif st.session_state.azure_selected_test_suite_id:
-                st.caption("Aún no se han consultado Test Cases para la Suite seleccionada.")
-        elif st.session_state.get("azure_selected_test_plan_id"):
-            st.caption("Aún no se han consultado las Suites del Test Plan seleccionado.")
-
-    elif not st.session_state.get("azure_test_plans"):
-        st.caption("Aún no se han consultado Test Plans.")
-
-
+ref = st.session_state.az_ref_detail
+if ref:
+    detail = ref["detail"]
+    comparison = ref["comparison"]
+    st.markdown("### 📌 Test Case de referencia")
+    st.write(f"**ID:** {detail.get('id')}  |  **Title:** {detail.get('title','')}")
+    st.write(f"**State:** {detail.get('state','')}  |  **Area Path:** {detail.get('area_path','')}")
+    st.markdown("### 📝 Description real de Azure")
+    st.markdown(detail.get("description") or "_Sin Description_")
+    st.markdown("### 🧪 Steps reales de Azure")
+    if detail.get("steps"):
+        st.dataframe(pd.DataFrame(detail["steps"], columns=["Step #", "Action", "Expected value"]), hide_index=True)
+    else:
+        st.warning("El Test Case no tiene Steps interpretables.")
+    st.markdown("### 🔍 Comparación contra nuestra estructura aprobada")
+    checks = {
+        "Producto dentro de Description": comparison["description_has_product"],
+        "Módulo dentro de Description": comparison["description_has_module"],
+        "Descripción dentro de Description": comparison["description_has_description"],
+        "Resultado esperado dentro de Description": comparison["description_has_expected"],
+        "Precondiciones dentro de Description": comparison["description_has_preconditions"],
+        "Caso de uso relacionado dentro de Description": comparison["description_has_related_use_case"],
+        "Steps con Action + Expected": comparison["steps_have_action_expected"],
+    }
+    st.table(pd.DataFrame([{"Elemento": k, "Cumple": "✅" if v else "⚠️"} for k,v in checks.items()]))
+    st.info("🔒 PUNTO DE CONTROL: aquí termina esta fase. No existe ninguna operación de creación, modificación o eliminación de Azure.")
 
 st.subheader("📁 Carga de Documento")
 
