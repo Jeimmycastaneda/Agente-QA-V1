@@ -2214,7 +2214,8 @@ with st.sidebar:
                 "Se conserva como referencia, pero no se inventan los elementos faltantes."
             )
 
-        if result and all(checks.values()):
+        current_result = st.session_state.get("result_json")
+        if current_result and all(checks.values()):
             st.markdown("### 4️⃣ Preparar nuevo Test Case — PREVIEW")
             st.caption(
                 "El agente toma la estructura del Test Case de referencia y la aplica "
@@ -2225,7 +2226,7 @@ with st.sidebar:
                 key="azure_prepare_new_cp_preview",
             ):
                 try:
-                    generated_cases = result.get("TEST_CASES", []) or []
+                    generated_cases = current_result.get("TEST_CASES", []) or []
                     if not generated_cases:
                         raise ValueError("No hay Test Cases generados para preparar el preview.")
                     st.session_state.azure_reference_preview = _build_reference_preview_case(
