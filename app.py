@@ -173,10 +173,20 @@ def list_test_cases(plan_id, suite_id):
             wi = item if isinstance(item, dict) else {}
 
         # ID robusto: primero id directo; luego posibles referencias/URLs.
+        # IMPORTANTE: no usar una expresión condicional sin paréntesis aquí.
+        # Azure normalmente devuelve el ID directamente en testCase.id.
+        # La versión anterior podía convertir ese ID válido en None
+        # porque el "else None" afectaba toda la expresión.
+        nested_work_item = wi.get("workItem")
+        nested_id = (
+            nested_work_item.get("id")
+            if isinstance(nested_work_item, dict)
+            else None
+        )
         raw_id = (
             wi.get("id")
             or item.get("id")
-            or (wi.get("workItem") or {}).get("id") if isinstance(wi.get("workItem"), dict) else None
+            or nested_id
         )
         if not raw_id:
             for container in (wi, item):
