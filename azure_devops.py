@@ -204,17 +204,47 @@ def list_test_suites(plan_id):
 
 
 def list_test_cases(plan_id, suite_id):
-    """Read-only: list Test Cases in one selected Suite."""
+    """Read-only: list Test Cases in one selected Suite.
+
+    Uses the Azure DevOps Test service endpoint because some projects return
+    404 for the equivalent Test Plan controller endpoint even though the
+    selected Test Plan and Suite are valid. This function is GET-only.
+    """
     config = get_azure_config(); _validate_config(config)
-    path = f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase"
-    url = _project_testplan_url(config, path) + "?api-version=7.1"
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    plan = quote(str(plan_id), safe="")
+    suite = quote(str(suite_id), safe="")
+
+    # Official Azure DevOps Test API: list all test cases in a suite.
+    # GET only; no create/update/delete operation is performed.
+    url = (
+        f"https://dev.azure.com/{org}/{project}"
+        f"/_apis/test/Plans/{plan}/suites/{suite}/testcases?api-version=7.1"
+    )
     payload, _ = _get_json(url, config["pat"])
+
     rows = []
     for item in payload.get("value") or []:
-        wi = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
-        rows.append({"id": wi.get("id"), "title": wi.get("name") or wi.get("title") or "", "raw": item})
-    return rows
+        tc = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
+        test_id = tc.get("id") or item.get("id")
+        if not test_id:
+            continue
 
+        # The suite-list response normally contains only the Test Case id/url.
+        # Read the title with a separate GET so the UI can offer a meaningful
+        # reference selector.
+        title = tc.get("name") or tc.get("title") or ""
+        if not title:
+            try:
+                detail = get_test_case_detail(test_id)
+                title = detail.get("title", "")
+            except Exception:
+                title = ""
+
+        rows.append({"id": test_id, "title": title, "raw": item})
+
+    return rows
 
 def _parse_steps_xml(xml_text):
     import html as _html
