@@ -11,6 +11,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
+from azure_devops import AzureDevOpsError, test_connection
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1644,6 +1645,28 @@ with st.sidebar:
         max_value=60,
         value=10,
     )
+
+    st.divider()
+    st.subheader("🔐 Azure DevOps")
+    st.caption(
+        "Prueba de conexión en modo solo lectura. No crea, modifica ni elimina CP."
+    )
+
+    if st.button("🔌 Probar conexión con Azure DevOps", key="azure_test_connection"):
+        try:
+            with st.spinner("Verificando conexión con Azure DevOps..."):
+                azure_result = test_connection()
+            st.success("✅ Conexión con Azure DevOps correcta.")
+            st.caption(
+                f"Organización: {azure_result['organization']} | "
+                f"Proyecto: {azure_result['project']} | "
+                f"Work Item: {azure_result['work_item_type']}"
+            )
+            st.info(azure_result["message"])
+        except AzureDevOpsError as exc:
+            st.error(f"❌ No se pudo conectar con Azure DevOps: {exc}")
+        except Exception as exc:
+            st.error(f"❌ Error inesperado al probar Azure DevOps: {exc}")
 
 
 st.subheader("📁 Carga de Documento")
