@@ -20,6 +20,14 @@ from urllib.request import Request, urlopen
 class AzureDevOpsError(RuntimeError):
     pass
 
+def _html(value):
+    """Escapa texto para mostrar contenido HTML de Azure de forma segura."""
+    import html as _html_module
+    if value is None:
+        return ""
+    return _html_module.escape(str(value), quote=False)
+
+
 def _az_config():
     try:
         secrets = st.secrets
