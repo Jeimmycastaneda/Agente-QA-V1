@@ -1,358 +1,290 @@
-"""
-Conector Azure DevOps para el Agente QA.
+"""Azure DevOps integration for Agente QA.
 
-IMPORTANTE:
-- Por defecto AZDO_ENABLED=false.
-- No contiene credenciales.
-- No modifica el prompt QA ni el Excel/PDF existente.
-- Crea un Work Item de tipo "Test Case".
-- Guarda los pasos nativos de Azure DevOps en Microsoft.VSTS.TCM.Steps.
-"""
+SAFE PHASE 1: read-only connectivity and Test Plans consultation only.
+No create/update/delete operations are implemented here.
 
-from __future__ import annotations
+IMPORTANT: this module is intentionally restricted to GET requests.
+"""
 
 import base64
-import html
 import json
 import os
-from dataclasses import dataclass
-from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
-from xml.etree import ElementTree as ET
 
 
-API_VERSION = os.getenv("AZDO_API_VERSION", "7.1")
+class AzureDevOpsError(RuntimeError):
+    """Controlled Azure DevOps integration error."""
 
 
-class AzureDevOpsConfigError(RuntimeError):
-    pass
-
-
-class AzureDevOpsApiError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class AzureDevOpsConfig:
-    organization: str
-    project: str
-    pat: str
-    enabled: bool = False
-    api_version: str = API_VERSION
-
-    @classmethod
-    def from_env(cls) -> "AzureDevOpsConfig":
-        enabled = os.getenv("AZDO_ENABLED", "false").strip().lower() in {
-            "1", "true", "yes", "si", "sí"
-        }
-        return cls(
-            organization=os.getenv("AZDO_ORGANIZATION", "").strip(),
-            project=os.getenv("AZDO_PROJECT", "").strip(),
-            pat=os.getenv("AZDO_PAT", "").strip(),
-            enabled=enabled,
-            api_version=os.getenv("AZDO_API_VERSION", API_VERSION).strip() or API_VERSION,
-        )
-
-    def validate_for_connection(self) -> None:
-        missing = []
-        if not self.organization:
-            missing.append("AZDO_ORGANIZATION")
-        if not self.project:
-            missing.append("AZDO_PROJECT")
-        if not self.pat:
-            missing.append("AZDO_PAT")
-        if missing:
-            raise AzureDevOpsConfigError(
-                "Faltan variables de entorno: " + ", ".join(missing)
-            )
-
-
-def _safe(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _as_lines(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [_safe(x) for x in value if _safe(x)]
-    text = _safe(value)
-    if not text:
-        return []
-    return [line.strip(" •-\t") for line in text.splitlines() if line.strip()]
-
-
-def _section(title: str, value: Any) -> str:
-    """Construye una seccion HTML en un bloque propio para Azure DevOps.
-
-    Cada seccion se envia como un <p> independiente y las listas como
-    <ul>/<li>, evitando que Azure colapse toda la Description en una sola linea.
-    """
-    lines = _as_lines(value)
-    if not lines:
-        return ""
-
-    label = f"<strong>{html.escape(title)}:</strong>"
-    if len(lines) == 1:
-        return f"<p>{label} {html.escape(lines[0])}</p>"
-
-    body = "<ul>" + "".join(
-        f"<li>{html.escape(line)}</li>" for line in lines
-    ) + "</ul>"
-    return f"<p>{label}</p>{body}"
-
-
-def build_description_html(test_case: dict[str, Any]) -> str:
-    """Construye la Description real de Azure con separacion por parrafos.
-
-    Orden aprobado: Producto, Modulo, Descripcion, Resultado esperado de la
-    prueba, Precondiciones y Caso de uso relacionado. No agrega informacion.
-    """
-    parts = [
-        _section("Producto", test_case.get("Product")),
-        _section("Módulo", test_case.get("Module")),
-        _section("Descripción", test_case.get("Description")),
-        _section("Resultado esperado de la prueba", test_case.get("Expected Result")),
-        _section("Precondiciones", test_case.get("Preconditions")),
-        _section("Caso de uso relacionado", test_case.get("Related Use Case")),
-    ]
-    return "".join(p for p in parts if p)
-
-def _step_number(step: dict[str, Any], fallback: int) -> int:
-    raw = step.get("Step #", fallback)
+def get_azure_config():
+    """Read Azure DevOps configuration from Streamlit secrets or env vars."""
     try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return fallback
+        import streamlit as st
+        secrets = st.secrets
+    except Exception:
+        secrets = {}
+
+    org = str(secrets.get("AZURE_DEVOPS_ORG", os.getenv("AZURE_DEVOPS_ORG", ""))).strip()
+    project = str(secrets.get("AZURE_DEVOPS_PROJECT", os.getenv("AZURE_DEVOPS_PROJECT", ""))).strip()
+    pat = str(secrets.get("AZURE_DEVOPS_PAT", os.getenv("AZURE_DEVOPS_PAT", ""))).strip()
+    return {"org": org, "project": project, "pat": pat}
 
 
-def build_steps_xml(test_case: dict[str, Any]) -> str:
-    """
-    Construye el XML esperado por el campo:
-    Microsoft.VSTS.TCM.Steps
-
-    Cada Step mantiene Action y Expected value separados.
-    No se inventa Expected value: si viene vacío, se conserva vacío.
-    """
-    steps = test_case.get("Steps") or []
-    normalized = []
-    for index, step in enumerate(steps, start=1):
-        if not isinstance(step, dict):
-            continue
-        normalized.append({
-            "number": _step_number(step, index),
-            "action": _safe(step.get("Action")),
-            "expected": _safe(step.get("Expected value")),
-        })
-
-    root = ET.Element(
-        "steps",
-        {"id": "0", "last": str(len(normalized))}
-    )
-
-    for position, step in enumerate(normalized, start=1):
-        step_id = str(position)
-        node = ET.SubElement(
-            root,
-            "step",
-            {"id": step_id, "type": "ActionStep"},
-        )
-        action = ET.SubElement(
-            node, "parameterizedString", {"isformatted": "true"}
-        )
-        action.text = step["action"]
-
-        expected = ET.SubElement(
-            node, "parameterizedString", {"isformatted": "true"}
-        )
-        expected.text = step["expected"]
-
-        ET.SubElement(node, "description")
-
-    return ET.tostring(root, encoding="unicode", short_empty_elements=True)
-
-
-def build_test_case_patch(test_case: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Genera el JSON Patch para crear un Test Case.
-    """
-    title = _safe(test_case.get("Title"))
-    if not title:
-        raise ValueError("El Test Case no tiene Title.")
-
-    patch = [
-        {
-            "op": "add",
-            "path": "/fields/System.Title",
-            "value": title,
-        },
-        {
-            "op": "add",
-            "path": "/fields/System.Description",
-            "value": build_description_html(test_case),
-        },
-        {
-            "op": "add",
-            "path": "/fields/Microsoft.VSTS.TCM.Steps",
-            "value": build_steps_xml(test_case),
-        },
-    ]
-
-    # Campos opcionales que existen en el modelo del agente.
-    # Solo se envían si la fuente realmente los trae.
-    area_path = _safe(test_case.get("Area Path"))
-    iteration_path = _safe(test_case.get("Iteration Path"))
-    tags = _safe(test_case.get("Tags"))
-
-    if area_path:
-        patch.append({
-            "op": "add",
-            "path": "/fields/System.AreaPath",
-            "value": area_path,
-        })
-
-    if iteration_path:
-        patch.append({
-            "op": "add",
-            "path": "/fields/System.IterationPath",
-            "value": iteration_path,
-        })
-
-    if tags:
-        patch.append({
-            "op": "add",
-            "path": "/fields/System.Tags",
-            "value": tags,
-        })
-
-    return patch
-
-
-def _auth_header(pat: str) -> str:
+def _auth_header(pat):
     token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
 
 
-def _request(
-    config: AzureDevOpsConfig,
-    method: str,
-    url: str,
-    body: Any | None = None,
-) -> dict[str, Any]:
-    headers = {
-        "Authorization": _auth_header(config.pat),
-        "Accept": "application/json",
-    }
-
-    data = None
-    if body is not None:
-        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        headers["Content-Type"] = "application/json-patch+json"
-
-    request = Request(url, data=data, headers=headers, method=method)
-
-    try:
-        with urlopen(request, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise AzureDevOpsApiError(
-            f"Azure DevOps respondió HTTP {exc.code}: {detail}"
-        ) from exc
-    except URLError as exc:
-        raise AzureDevOpsApiError(
-            f"No fue posible conectarse con Azure DevOps: {exc.reason}"
-        ) from exc
-
-
-def validate_connection(config: AzureDevOpsConfig | None = None) -> dict[str, Any]:
-    """
-    Comprueba acceso al proyecto sin crear ni modificar Work Items.
-    """
-    config = config or AzureDevOpsConfig.from_env()
-    config.validate_for_connection()
-
-    org = quote(config.organization, safe="")
-    project = quote(config.project, safe="")
-    url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/projects/"
-        f"{project}?api-version={quote(config.api_version, safe='.')}"
+def _get_json(url, pat):
+    """Execute one GET request. This helper NEVER performs writes."""
+    request = Request(
+        url,
+        method="GET",
+        headers={
+            "Authorization": _auth_header(pat),
+            "Accept": "application/json",
+            "User-Agent": "Agente-QA-Streamlit/1.0",
+        },
     )
+    try:
+        with urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload, response.headers
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        except Exception:
+            pass
+        if exc.code in (401, 403):
+            raise AzureDevOpsError(
+                f"Azure rechazó la autenticación/autorización (HTTP {exc.code}). "
+                "Verifica el PAT, su vigencia y sus scopes."
+            ) from exc
+        if exc.code == 404:
+            raise AzureDevOpsError(
+                "No se encontró el proyecto o el recurso de Test Plans. "
+                "Verifica AZURE_DEVOPS_ORG y AZURE_DEVOPS_PROJECT."
+            ) from exc
+        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
+    except URLError as exc:
+        raise AzureDevOpsError(
+            f"No fue posible comunicarse con Azure DevOps: {exc.reason}"
+        ) from exc
+    except Exception as exc:
+        raise AzureDevOpsError(f"Error inesperado de conexión: {exc}") from exc
 
-    return _request(config, "GET", url)
 
-
-def create_test_case(
-    test_case: dict[str, Any],
-    config: AzureDevOpsConfig | None = None,
-) -> dict[str, Any]:
-    """
-    Crea un Test Case real únicamente cuando AZDO_ENABLED=true.
-
-    El Work Item type es Test Case y los pasos se almacenan en
-    Microsoft.VSTS.TCM.Steps para que Azure DevOps los muestre
-    como Steps / Action / Expected result.
-    """
-    config = config or AzureDevOpsConfig.from_env()
-
-    if not config.enabled:
-        raise AzureDevOpsConfigError(
-            "AZDO_ENABLED no está activo. El conector está en modo seguro."
+def _validate_config(config):
+    missing = [key for key in ("org", "project", "pat") if not config[key]]
+    if missing:
+        raise AzureDevOpsError(
+            "Faltan secretos de Azure DevOps: " + ", ".join(missing)
         )
 
-    config.validate_for_connection()
 
-    org = quote(config.organization, safe="")
-    project = quote(config.project, safe="")
-    work_item_type = quote("$Test Case", safe="")
+def test_connection():
+    """Read-only check of the configured org/project and Test Case work item type.
 
+    This function performs only HTTP GET requests. It does not create, update,
+    or delete any Azure DevOps resource.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+    org = config["org"]
+    project = quote(config["project"], safe="")
     url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
-        f"{work_item_type}?api-version={quote(config.api_version, safe='.')}"
+        f"https://dev.azure.com/{quote(org, safe='')}/{project}"
+        f"/_apis/wit/workitemtypes/Test%20Case?api-version=7.1"
     )
-
-    return _request(
-        config,
-        "POST",
-        url,
-        build_test_case_patch(test_case),
-    )
-
-
-def create_test_cases(
-    test_cases: list[dict[str, Any]],
-    config: AzureDevOpsConfig | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Crea los casos uno por uno para facilitar trazabilidad y detectar
-    exactamente cuál caso falla.
-    """
-    results = []
-    for index, test_case in enumerate(test_cases, start=1):
-        result = create_test_case(test_case, config=config)
-        results.append({
-            "sequence": index,
-            "source_id": _safe(test_case.get("ID")),
-            "title": _safe(test_case.get("Title")),
-            "azure_id": result.get("id"),
-            "url": result.get("_links", {}).get("html", {}).get("href", ""),
-        })
-    return results
-
-
-def preview_test_case(test_case: dict[str, Any]) -> dict[str, Any]:
-    """
-    Modo seguro: no realiza llamadas de red.
-    Permite revisar exactamente qué se enviaría a Azure.
-    """
+    payload, _ = _get_json(url, config["pat"])
     return {
-        "title": _safe(test_case.get("Title")),
-        "description_html": build_description_html(test_case),
-        "steps_xml": build_steps_xml(test_case),
-        "patch": build_test_case_patch(test_case),
+        "ok": True,
+        "organization": org,
+        "project": config["project"],
+        "work_item_type": payload.get("name", "Test Case"),
+        "message": "Conexión correcta. Solo se realizó una consulta de lectura.",
+    }
+
+
+def _project_testplan_url(config, path):
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    return f"https://dev.azure.com/{org}/{project}/_apis/testplan/{path}"
+
+
+def list_test_plans(limit=10):
+    """Read-only: consult only the 10 most recent Test Plans.
+
+    A single GET is made with $top=10 against Azure's Test Plans list API.
+    No pagination is followed and no write operation is performed.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+    limit = max(1, min(int(limit), 10))
+
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/test/plans"
+        f"?$top={limit}&api-version=5.0"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    raw_plans = payload.get("value") or []
+
+    # Azure does not expose a createdDate field in the TestPlan resource.
+    # IDs are monotonic in this project, so descending ID gives the newest
+    # plans among the small set returned by the API.
+    raw_plans = sorted(raw_plans, key=lambda p: int(p.get("id") or 0), reverse=True)[:limit]
+
+    plans = []
+    for p in raw_plans:
+        area = p.get("areaPath", "")
+        if not area and isinstance(p.get("area"), dict):
+            area = p["area"].get("name", "")
+        plans.append({
+            "id": p.get("id"),
+            "name": p.get("name", ""),
+            "state": p.get("state", ""),
+            "area_path": area,
+            "iteration": p.get("iteration", ""),
+            "start_date": p.get("startDate", ""),
+            "end_date": p.get("endDate", ""),
+        })
+
+    return {
+        "ok": True,
+        "organization": config["org"],
+        "project": config["project"],
+        "count": len(plans),
+        "plans": plans,
+        "message": (
+            f"Consulta correcta: {len(plans)} Test Plan(s) más recientes. "
+            "Solo se realizó GET; no se modificó Azure."
+        ),
+    }
+
+
+def get_test_plan(plan_id):
+    """Read-only detail for one selected Test Plan."""
+    config = get_azure_config(); _validate_config(config)
+    url = _project_testplan_url(config, f"plans/{quote(str(plan_id), safe='')}") + "?api-version=7.1"
+    payload, _ = _get_json(url, config["pat"])
+    return payload
+
+
+def list_test_suites(plan_id):
+    """Read-only: list suites belonging to one selected Test Plan."""
+    config = get_azure_config(); _validate_config(config)
+    url = _project_testplan_url(config, f"Plans/{quote(str(plan_id), safe='')}/suites") + "?api-version=7.1"
+    payload, _ = _get_json(url, config["pat"])
+    suites = payload.get("value") or []
+    return [{"id": s.get("id"), "name": s.get("name", ""), "suite_type": s.get("suiteType", ""),
+             "plan_id": s.get("plan", {}).get("id") if isinstance(s.get("plan"), dict) else plan_id,
+             "parent_suite": s.get("parentSuite", {}).get("id") if isinstance(s.get("parentSuite"), dict) else None}
+            for s in suites]
+
+
+def list_test_cases(plan_id, suite_id):
+    """Read-only: list Test Cases in one selected Suite.
+
+    Uses the Azure DevOps Test service endpoint because some projects return
+    404 for the equivalent Test Plan controller endpoint even though the
+    selected Test Plan and Suite are valid. This function is GET-only.
+    """
+    config = get_azure_config(); _validate_config(config)
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    plan = quote(str(plan_id), safe="")
+    suite = quote(str(suite_id), safe="")
+
+    # Official Azure DevOps Test API: list all test cases in a suite.
+    # GET only; no create/update/delete operation is performed.
+    url = (
+        f"https://dev.azure.com/{org}/{project}"
+        f"/_apis/test/Plans/{plan}/suites/{suite}/testcases?api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+
+    rows = []
+    for item in payload.get("value") or []:
+        tc = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
+        test_id = tc.get("id") or item.get("id")
+        if not test_id:
+            continue
+
+        # The suite-list response normally contains only the Test Case id/url.
+        # Read the title with a separate GET so the UI can offer a meaningful
+        # reference selector.
+        title = tc.get("name") or tc.get("title") or ""
+        if not title:
+            try:
+                detail = get_test_case_detail(test_id)
+                title = detail.get("title", "")
+            except Exception:
+                title = ""
+
+        rows.append({"id": test_id, "title": title, "raw": item})
+
+    return rows
+
+def _parse_steps_xml(xml_text):
+    import html as _html
+    import re as _re
+    if not xml_text:
+        return []
+    text = _html.unescape(str(xml_text))
+    steps = []
+    for match in _re.finditer(r'<step\b[^>]*>.*?</step>', text, flags=_re.I | _re.S):
+        node = match.group(0)
+        vals = _re.findall(r'<parameterizedString[^>]*>(.*?)</parameterizedString>', node, flags=_re.I | _re.S)
+        clean = []
+        for value in vals[:2]:
+            value = _re.sub(r'<[^>]+>', '', value)
+            clean.append(_html.unescape(value).strip())
+        if clean:
+            steps.append({"Step #": len(steps)+1, "Action": clean[0] if len(clean)>0 else "", "Expected value": clean[1] if len(clean)>1 else ""})
+    return steps
+
+
+def get_test_case_detail(test_case_id):
+    """Read-only detail of one existing Test Case for structure comparison."""
+    config = get_azure_config(); _validate_config(config)
+    org = quote(config["org"], safe=""); project = quote(config["project"], safe="")
+    url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/{quote(str(test_case_id), safe='')}?api-version=7.1"
+    payload, _ = _get_json(url, config["pat"])
+    fields = payload.get("fields") or {}
+    description = fields.get("System.Description", "") or ""
+    steps_xml = fields.get("Microsoft.VSTS.TCM.Steps", "") or ""
+    steps = _parse_steps_xml(steps_xml)
+    return {
+        "id": payload.get("id"),
+        "title": fields.get("System.Title", ""),
+        "description": description,
+        "steps": steps,
+        "area_path": fields.get("System.AreaPath", ""),
+        "iteration_path": fields.get("System.IterationPath", ""),
+        "state": fields.get("System.State", ""),
+        "work_item_type": fields.get("System.WorkItemType", "Test Case"),
+        "raw_fields": fields,
+    }
+
+
+def compare_test_case_structure(detail):
+    """No network. Compares the selected Azure case with our approved structure."""
+    description = str(detail.get("description") or "")
+    labels = ["Producto:", "Módulo:", "Descripción:", "Resultado esperado de la prueba:", "Precondiciones:", "Caso de uso relacionado:"]
+    present = {label: label.lower() in description.lower() for label in labels}
+    return {
+        "description_has_product": present["Producto:"],
+        "description_has_module": present["Módulo:"],
+        "description_has_description": present["Descripción:"],
+        "description_has_expected": present["Resultado esperado de la prueba:"],
+        "description_has_preconditions": present["Precondiciones:"],
+        "description_has_related_use_case": present["Caso de uso relacionado:"],
+        "steps_count": len(detail.get("steps") or []),
+        "steps_have_action_expected": all(bool(str(s.get("Action", "")).strip()) and bool(str(s.get("Expected value", "")).strip()) for s in (detail.get("steps") or [])),
+        "reference_model": "Description: Producto + Módulo + Descripción + Resultado esperado de la prueba + Precondiciones + Caso de uso relacionado; Steps: Steps + Action + Expected."
     }
