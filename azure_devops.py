@@ -109,52 +109,118 @@ def test_connection():
     }
 
 
-def list_test_plans():
-    """Return the Test Plans visible to the configured project.
+def get_test_plan(plan_id):
+    """Return details of ONE Test Plan by ID using a single GET request.
 
-    SAFETY CONTRACT: this function ONLY issues GET requests to the Test Plans
-    list endpoint. It does not create, update, delete, or modify Test Plans,
-    Test Suites, Test Cases, Work Items, or any other Azure DevOps resource.
+    SAFETY CONTRACT: this function ONLY reads the selected Test Plan.
+    It does not query suites, test cases, work items, or any other resource,
+    and it never creates, updates, or deletes anything.
     """
     config = get_azure_config()
     _validate_config(config)
 
+    try:
+        plan_id = int(plan_id)
+    except (TypeError, ValueError):
+        raise AzureDevOpsError("El ID del Test Plan no es válido.")
+
+    if plan_id <= 0:
+        raise AzureDevOpsError("El ID del Test Plan debe ser mayor que cero.")
+
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/testplan/plans/"
+        f"{plan_id}?api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+
+    return {
+        "ok": True,
+        "organization": config["org"],
+        "project": config["project"],
+        "plan": {
+            "id": payload.get("id"),
+            "name": payload.get("name", ""),
+            "state": payload.get("state", ""),
+            "area_path": payload.get("areaPath", ""),
+            "iteration": payload.get("iteration", ""),
+            "start_date": payload.get("startDate", ""),
+            "end_date": payload.get("endDate", ""),
+        },
+        "message": (
+            "Consulta del Test Plan correcta. Solo se realizó una consulta GET "
+            "sobre el Test Plan seleccionado; no se creó, modificó ni eliminó "
+            "ningún recurso."
+        ),
+    }
+
+
+def list_test_plans(limit=10):
+    """Return only the 10 most recent Test Plans visible to the project.
+
+    SAFETY CONTRACT: this function ONLY issues ONE GET request to the Test Plans
+    list endpoint. It never follows continuation pages and never creates,
+    updates, or deletes any Azure DevOps resource.
+
+    Azure's Test Plans list API does not expose a $top/order-by parameter.
+    Therefore, within this intentionally limited first batch, plans are ordered
+    by descending Azure Plan ID and the first ``limit`` are returned. The ID is
+    used as the creation-order proxy; no Work Item query is performed.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+
+    try:
+        limit = max(1, min(int(limit), 10))
+    except (TypeError, ValueError):
+        limit = 10
+
     org = quote(config["org"], safe="")
     project = quote(config["project"], safe="")
     base_url = f"https://dev.azure.com/{org}/{project}/_apis/testplan/plans"
-    continuation = None
-    plans = []
 
-    # Read all pages when Azure provides a continuation token. Every request
-    # remains GET-only and is limited to the Test Plans list endpoint.
-    while True:
-        params = {"api-version": "7.1"}
-        if continuation:
-            params["continuationToken"] = continuation
-        url = f"{base_url}?{urlencode(params)}"
-        payload, headers = _get_json(url, config["pat"])
-        plans.extend(payload.get("value") or [])
-        continuation = headers.get("x-ms-continuationtoken")
-        if not continuation:
-            break
+    # IMPORTANT: only the first Azure response is requested. We deliberately
+    # do NOT follow x-ms-continuationtoken because the UI must remain a small,
+    # read-only consultation of Test Plans only.
+    params = {
+        "api-version": "7.1",
+        "includePlanDetails": "false",
+    }
+    url = f"{base_url}?{urlencode(params)}"
+    payload, _ = _get_json(url, config["pat"])
+    raw_plans = payload.get("value") or []
+
+    def plan_id(plan):
+        try:
+            return int(plan.get("id"))
+        except (TypeError, ValueError):
+            return -1
+
+    raw_plans = sorted(raw_plans, key=plan_id, reverse=True)[:limit]
+
+    plans = [
+        {
+            "id": plan.get("id"),
+            "name": plan.get("name", ""),
+            "state": plan.get("state", ""),
+            "area_path": plan.get("areaPath", ""),
+            "iteration": plan.get("iteration", ""),
+        }
+        for plan in raw_plans
+    ]
 
     return {
         "ok": True,
         "organization": config["org"],
         "project": config["project"],
         "count": len(plans),
-        "plans": [
-            {
-                "id": plan.get("id"),
-                "name": plan.get("name", ""),
-                "state": plan.get("state", ""),
-                "area_path": plan.get("areaPath", ""),
-                "iteration": plan.get("iteration", ""),
-            }
-            for plan in plans
-        ],
+        "plans": plans,
         "message": (
-            "Consulta de Test Plans correcta. Solo se realizaron consultas GET; "
-            "no se creó, modificó ni eliminó ningún recurso."
+            f"Consulta de Test Plans correcta. Se consultó únicamente la primera "
+            f"respuesta de Azure y se muestran los {len(plans)} planes con mayor "
+            "ID. Solo se realizaron consultas GET; no se creó, modificó ni "
+            "eliminó ningún recurso."
         ),
     }
+

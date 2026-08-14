@@ -11,7 +11,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
-from azure_devops import AzureDevOpsError, list_test_plans, test_connection
+from azure_devops import AzureDevOpsError, get_test_plan, list_test_plans, test_connection
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1598,6 +1598,12 @@ if "excel_data" not in st.session_state:
     st.session_state.excel_data = None
 if "pdf_data" not in st.session_state:
     st.session_state.pdf_data = None
+if "azure_test_plans" not in st.session_state:
+    st.session_state.azure_test_plans = []
+if "azure_selected_test_plan_id" not in st.session_state:
+    st.session_state.azure_selected_test_plan_id = None
+if "azure_selected_test_plan_detail" not in st.session_state:
+    st.session_state.azure_selected_test_plan_detail = None
 
 st.title(f"🤖 Agente QA {APP_VERSION} — Generador de Casos de Prueba")
 st.caption(
@@ -1670,29 +1676,68 @@ with st.sidebar:
 
     st.markdown("### 📋 Test Plans")
     st.caption(
-        "Consulta de solo lectura. El agente únicamente lee los Test Plans del proyecto. "
-        "No crea, edita ni elimina Test Plans, Suites, Test Cases ni Work Items."
+        "Consulta de solo lectura. Se muestran únicamente los 10 Test Plans más recientes "
+        "por ID, usando una sola consulta al listado de Test Plans. No crea, edita ni elimina "
+        "Test Plans, Suites, Test Cases ni Work Items."
     )
     if st.button("📋 Consultar Test Plans", key="azure_list_test_plans"):
         try:
             with st.spinner("Consultando Test Plans de Azure DevOps..."):
                 plans_result = list_test_plans()
+            st.session_state.azure_test_plans = plans_result.get("plans", [])
+            st.session_state.azure_selected_test_plan_detail = None
             st.success(
-                f"✅ Consulta correcta: {plans_result['count']} Test Plan(s) encontrados."
+                f"✅ Consulta correcta: {plans_result['count']} Test Plan(s) mostrados."
             )
-            if plans_result["plans"]:
-                st.dataframe(
-                    pd.DataFrame(plans_result["plans"]),
-                    width="stretch",
-                    hide_index=True,
-                )
-            else:
-                st.info("No se encontraron Test Plans visibles para este proyecto.")
-            st.info(plans_result["message"])
         except AzureDevOpsError as exc:
             st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
         except Exception as exc:
             st.error(f"❌ Error inesperado al consultar Test Plans: {exc}")
+
+    plans = st.session_state.azure_test_plans
+    if plans:
+        plans_df = pd.DataFrame(plans)
+        st.dataframe(plans_df, width="stretch", hide_index=True)
+
+        plan_options = {
+            f"{plan.get('id')} — {plan.get('name', '')}": plan.get('id')
+            for plan in plans
+        }
+        selected_plan_label = st.selectbox(
+            "📌 Selecciona un Test Plan para consultar su detalle",
+            list(plan_options.keys()),
+            key="azure_selected_test_plan",
+        )
+        st.session_state.azure_selected_test_plan_id = plan_options[selected_plan_label]
+
+        if st.button(
+            "🔎 Consultar Test Plan seleccionado",
+            key="azure_get_selected_test_plan",
+        ):
+            try:
+                selected_plan_id = st.session_state.azure_selected_test_plan_id
+                with st.spinner("Consultando el Test Plan seleccionado..."):
+                    selected_plan_result = get_test_plan(selected_plan_id)
+                st.session_state.azure_selected_test_plan_detail = selected_plan_result["plan"]
+            except AzureDevOpsError as exc:
+                st.error(f"❌ No se pudo consultar el Test Plan seleccionado: {exc}")
+            except Exception as exc:
+                st.error(f"❌ Error inesperado al consultar el Test Plan: {exc}")
+
+        detail = st.session_state.azure_selected_test_plan_detail
+        if detail:
+            st.success(
+                f"✅ Test Plan consultado: {detail.get('id')} — {detail.get('name', '')}"
+            )
+            st.dataframe(pd.DataFrame([detail]), width="stretch", hide_index=True)
+            st.info(
+                "Consulta del Test Plan correcta. Solo se realizó una consulta GET "
+                "sobre el Test Plan seleccionado; no se creó, modificó ni eliminó "
+                "ningún recurso."
+            )
+    elif not st.session_state.get("azure_test_plans"):
+        st.caption("Aún no se han consultado Test Plans.")
+
 
 
 st.subheader("📁 Carga de Documento")
