@@ -1669,80 +1669,82 @@ with st.sidebar:
             st.error(f"❌ Error inesperado al probar Azure DevOps: {exc}")
 
 
+    # ========================================================
+    # AZURE DEVOPS — REFERENCIA DE ESTRUCTURA (SOLO LECTURA)
+    # Este flujo permanece dentro del sidebar para que siempre sea visible.
+    # NO contiene operaciones POST/PATCH/PUT/DELETE.
+    # ========================================================
+    st.divider()
+    st.subheader("🔎 Referencia de Test Case")
+    st.caption("Solo lectura: selecciona un Test Plan, Suite y Test Case para comparar su estructura. No crea ni modifica Azure.")
 
-# ============================================================
-# AZURE DEVOPS — REFERENCIA DE ESTRUCTURA (SOLO LECTURA)
-# Hasta comparar un Test Case real. SIN escritura.
-# ============================================================
-st.divider()
-st.subheader("🔎 Referencia de Test Case en Azure")
-st.caption("Selecciona un Test Plan, una Suite y un Test Case existente para comparar su estructura. Esta etapa es solo lectura.")
+    if "az_ref_plans" not in st.session_state: st.session_state.az_ref_plans = []
+    if "az_ref_suites" not in st.session_state: st.session_state.az_ref_suites = []
+    if "az_ref_cases" not in st.session_state: st.session_state.az_ref_cases = []
+    if "az_ref_detail" not in st.session_state: st.session_state.az_ref_detail = None
 
-if "az_ref_plans" not in st.session_state: st.session_state.az_ref_plans = []
-if "az_ref_suites" not in st.session_state: st.session_state.az_ref_suites = []
-if "az_ref_cases" not in st.session_state: st.session_state.az_ref_cases = []
-if "az_ref_detail" not in st.session_state: st.session_state.az_ref_detail = None
-
-if st.button("📋 Consultar 10 Test Plans", key="az_ref_plans_btn"):
-    try:
-        with st.spinner("Consultando los 10 Test Plans más recientes..."):
-            response = list_test_plans(limit=10)
-        st.session_state.az_ref_plans = response.get("plans", [])
-        st.session_state.az_ref_suites = []
-        st.session_state.az_ref_cases = []
-        st.session_state.az_ref_detail = None
-        st.success(f"✅ {len(st.session_state.az_ref_plans)} Test Plans consultados. Solo GET.")
-    except Exception as exc:
-        st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
-
-plans = st.session_state.az_ref_plans
-if plans:
-    plan_labels = [f"{p.get('id')} — {p.get('name','')}" for p in plans]
-    selected_plan_label = st.selectbox("1️⃣ Selecciona un Test Plan", plan_labels, key="az_ref_plan_select")
-    selected_plan = plans[plan_labels.index(selected_plan_label)]
-    if st.button("🔎 Consultar Suites del Test Plan", key="az_ref_suites_btn"):
+    if st.button("📋 Consultar 10 Test Plans", key="az_ref_plans_btn"):
         try:
-            with st.spinner("Consultando Suites..."):
-                st.session_state.az_ref_suites = list_test_suites(selected_plan.get("id"))
+            with st.spinner("Consultando los 10 Test Plans más recientes..."):
+                response = list_test_plans(limit=10)
+            st.session_state.az_ref_plans = response.get("plans", [])
+            st.session_state.az_ref_suites = []
             st.session_state.az_ref_cases = []
             st.session_state.az_ref_detail = None
-            st.success(f"✅ {len(st.session_state.az_ref_suites)} Suite(s) encontradas. Solo GET.")
+            st.success(f"✅ {len(st.session_state.az_ref_plans)} Test Plans consultados. Solo GET.")
         except Exception as exc:
-            st.error(f"❌ No se pudieron consultar las Suites: {exc}")
+            st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
 
-suites = st.session_state.az_ref_suites
-if suites:
-    suite_labels = [f"{s.get('id')} — {s.get('name','')}" for s in suites]
-    selected_suite_label = st.selectbox("2️⃣ Selecciona una Suite", suite_labels, key="az_ref_suite_select")
-    selected_suite = suites[suite_labels.index(selected_suite_label)]
-    if st.button("🧪 Consultar Test Cases de la Suite", key="az_ref_cases_btn"):
-        try:
-            with st.spinner("Consultando Test Cases..."):
-                st.session_state.az_ref_cases = list_test_cases(selected_plan.get("id"), selected_suite.get("id"))
-            st.session_state.az_ref_detail = None
-            st.success(f"✅ {len(st.session_state.az_ref_cases)} Test Case(s) encontrados. Solo GET.")
-        except Exception as exc:
-            st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
+    plans = st.session_state.az_ref_plans
+    if plans:
+        plan_labels = [f"{p.get('id')} — {p.get('name','')}" for p in plans]
+        selected_plan_label = st.selectbox("1️⃣ Test Plan", plan_labels, key="az_ref_plan_select")
+        selected_plan = plans[plan_labels.index(selected_plan_label)]
+        if st.button("🔎 Consultar Suites", key="az_ref_suites_btn"):
+            try:
+                with st.spinner("Consultando Suites..."):
+                    st.session_state.az_ref_suites = list_test_suites(selected_plan.get("id"))
+                st.session_state.az_ref_cases = []
+                st.session_state.az_ref_detail = None
+                st.success(f"✅ {len(st.session_state.az_ref_suites)} Suite(s). Solo GET.")
+            except Exception as exc:
+                st.error(f"❌ No se pudieron consultar las Suites: {exc}")
 
-cases = st.session_state.az_ref_cases
-if cases:
-    case_labels = [f"{c.get('id')} — {c.get('title','')}" for c in cases]
-    selected_case_label = st.selectbox("3️⃣ Selecciona el Test Case de referencia", case_labels, key="az_ref_case_select")
-    selected_az_case = cases[case_labels.index(selected_case_label)]
-    if st.button("🔬 Consultar y comparar estructura", key="az_ref_compare_btn"):
-        try:
-            with st.spinner("Consultando detalle y comparando estructura..."):
-                detail = get_test_case_detail(selected_az_case.get("id"))
-                comparison = compare_test_case_structure(detail)
-            st.session_state.az_ref_detail = {"detail": detail, "comparison": comparison}
-            st.success("✅ Comparación realizada. Solo GET. El flujo se detiene aquí.")
-        except Exception as exc:
-            st.error(f"❌ No se pudo consultar el detalle: {exc}")
+    suites = st.session_state.az_ref_suites
+    if suites:
+        suite_labels = [f"{s.get('id')} — {s.get('name','')}" for s in suites]
+        selected_suite_label = st.selectbox("2️⃣ Suite", suite_labels, key="az_ref_suite_select")
+        selected_suite = suites[suite_labels.index(selected_suite_label)]
+        if st.button("🧪 Consultar Test Cases", key="az_ref_cases_btn"):
+            try:
+                with st.spinner("Consultando Test Cases..."):
+                    st.session_state.az_ref_cases = list_test_cases(selected_plan.get("id"), selected_suite.get("id"))
+                st.session_state.az_ref_detail = None
+                st.success(f"✅ {len(st.session_state.az_ref_cases)} Test Case(s). Solo GET.")
+            except Exception as exc:
+                st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
 
-ref = st.session_state.az_ref_detail
+    cases = st.session_state.az_ref_cases
+    if cases:
+        case_labels = [f"{c.get('id')} — {c.get('title','')}" for c in cases]
+        selected_case_label = st.selectbox("3️⃣ Test Case de referencia", case_labels, key="az_ref_case_select")
+        selected_az_case = cases[case_labels.index(selected_case_label)]
+        if st.button("🔬 Consultar y comparar", key="az_ref_compare_btn"):
+            try:
+                with st.spinner("Consultando detalle y comparando estructura..."):
+                    detail = get_test_case_detail(selected_az_case.get("id"))
+                    comparison = compare_test_case_structure(detail)
+                st.session_state.az_ref_detail = {"detail": detail, "comparison": comparison}
+                st.success("✅ Comparación realizada. Solo GET. El flujo se detiene aquí.")
+            except Exception as exc:
+                st.error(f"❌ No se pudo consultar el detalle: {exc}")
+
+# El detalle se muestra en el área principal, para que sea legible.
+ref = st.session_state.get("az_ref_detail")
 if ref:
     detail = ref["detail"]
     comparison = ref["comparison"]
+    st.divider()
     st.markdown("### 📌 Test Case de referencia")
     st.write(f"**ID:** {detail.get('id')}  |  **Title:** {detail.get('title','')}")
     st.write(f"**State:** {detail.get('state','')}  |  **Area Path:** {detail.get('area_path','')}")
@@ -1750,7 +1752,7 @@ if ref:
     st.markdown(detail.get("description") or "_Sin Description_")
     st.markdown("### 🧪 Steps reales de Azure")
     if detail.get("steps"):
-        st.dataframe(pd.DataFrame(detail["steps"], columns=["Step #", "Action", "Expected value"]), hide_index=True)
+        st.dataframe(pd.DataFrame(detail["steps"], columns=["Step #", "Action", "Expected value"]), hide_index=True, width="stretch")
     else:
         st.warning("El Test Case no tiene Steps interpretables.")
     st.markdown("### 🔍 Comparación contra nuestra estructura aprobada")
@@ -1764,7 +1766,9 @@ if ref:
         "Steps con Action + Expected": comparison["steps_have_action_expected"],
     }
     st.table(pd.DataFrame([{"Elemento": k, "Cumple": "✅" if v else "⚠️"} for k,v in checks.items()]))
-    st.info("🔒 PUNTO DE CONTROL: aquí termina esta fase. No existe ninguna operación de creación, modificación o eliminación de Azure.")
+    st.warning("🛑 PUNTO DE CONTROL: aquí termina esta fase. Solo se realizaron consultas GET. No se crea, modifica ni elimina ningún recurso de Azure.")
+
+
 
 st.subheader("📁 Carga de Documento")
 
