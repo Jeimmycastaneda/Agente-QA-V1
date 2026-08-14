@@ -506,7 +506,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V37-ULTIMOS10-HU-REFERENCIA-PREVIEW-REVISION"
+APP_VERSION = "V39-EDICION-CP-PREVIEW-REVISION-FUNCIONAL"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1989,6 +1989,7 @@ def _build_reference_preview_case(reference_detail, generated_case):
         "reference_test_case_title": reference_detail.get("title"),
     }
 
+
 # ============================================================
 # INTERFAZ
 # ============================================================
@@ -2017,6 +2018,7 @@ for _key, _default in {
     "azure_reference_case_id": None,
     "azure_reference_detail": None,
     "azure_reference_preview": None,
+    "azure_preview_edit_mode": False,
 }.items():
     if _key not in st.session_state:
         st.session_state[_key] = _default
@@ -2299,89 +2301,20 @@ with st.sidebar:
                             )
                         )
                     st.session_state.azure_reference_preview = previews
+                    st.session_state.azure_preview_edit_mode = True
+                    # El PREVIEW se edita en la sección existente "✏️ Editar caso de prueba".
+                    # No se crea una sección nueva y Azure permanece en modo solo lectura.
+                    result_for_preview = dict(current_result)
+                    result_for_preview["TEST_CASES"] = previews
+                    st.session_state.result_json = result_for_preview
+                    st.success(
+                        f"✅ {len(previews)} CP(s) preparados para revisión funcional. "
+                        "Ahora se muestran en la sección existente '✏️ Editar caso de prueba'."
+                    )
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
 
-        preview = st.session_state.get("azure_reference_preview")
-        if preview:
-            preview_list = preview if isinstance(preview, list) else [preview]
-            st.markdown("### 👀 CP nuevo generado desde la HU — antes de enviarlo a Azure")
-            st.info(
-                "PUNTO DE CONTROL: esta salida es únicamente una vista previa para revisión funcional. "
-                "La HU es la fuente de verdad del contenido; el Test Case real de Azure se usa como referencia "
-                "de estructura. No se ha realizado ningún POST/creación en Azure DevOps."
-            )
-
-            review_rows = []
-            for idx, preview_case in enumerate(preview_list, start=1):
-                st.markdown(f"#### CP {idx}: {safe_text(preview_case.get('ID'), f'CP-PREVIEW-{idx:05d}')}")
-                st.markdown(f"**Title:** {safe_text(preview_case.get('Title'))}")
-                st.caption(
-                    f"Referencia Azure: {safe_text(preview_case.get('reference_test_case_id'))} — "
-                    f"{safe_text(preview_case.get('reference_test_case_title'))}"
-                )
-
-                st.markdown("##### Description")
-                for label, value in _reference_description_sections(preview_case.get("Description", "")):
-                    with st.container(border=True):
-                        st.markdown(f"**{label}**")
-                        st.write(value)
-
-                st.markdown("##### Steps")
-                preview_steps = pd.DataFrame(preview_case.get("Steps") or [])
-                if not preview_steps.empty:
-                    cols = [c for c in ["Step #", "Action", "Expected value"] if c in preview_steps.columns]
-                    st.dataframe(preview_steps[cols], width="stretch", hide_index=True)
-                else:
-                    st.warning("⚠️ El CP nuevo no tiene Steps para revisar.")
-
-                # Validación funcional previa: no envía nada a Azure.
-                desc_text = safe_text(preview_case.get("Description"))
-                step_rows = preview_case.get("Steps") or []
-                preview_checks = {
-                    "Producto dentro de Description": "producto:" in desc_text.lower(),
-                    "Módulo dentro de Description": ("módulo:" in desc_text.lower() or "modulo:" in desc_text.lower()),
-                    "Descripción dentro de Description": ("descripción:" in desc_text.lower() or "descripcion:" in desc_text.lower()),
-                    "Resultado esperado dentro de Description": "resultado esperado de la prueba:" in desc_text.lower(),
-                    "Precondiciones dentro de Description": "precondiciones:" in desc_text.lower(),
-                    "Caso de uso relacionado dentro de Description": "caso de uso relacionado:" in desc_text.lower(),
-                    "Steps con Action + Expected": bool(step_rows) and all(
-                        safe_text(s.get("Action")) and safe_text(s.get("Expected value"))
-                        for s in step_rows
-                    ),
-                }
-                for label, ok in preview_checks.items():
-                    review_rows.append({
-                        "CP": safe_text(preview_case.get("ID"), f"CP-PREVIEW-{idx:05d}"),
-                        "Elemento": label,
-                        "Cumple": "✅" if ok else "⚠️",
-                    })
-                st.markdown("##### 🔎 Verificación previa del CP")
-                st.dataframe(
-                    pd.DataFrame([
-                        {"Elemento": label, "Cumple": "✅" if ok else "⚠️"}
-                        for label, ok in preview_checks.items()
-                    ]),
-                    width="stretch",
-                    hide_index=True,
-                )
-                st.divider()
-
-            all_preview_ok = all(row["Cumple"] == "✅" for row in review_rows) if review_rows else False
-            if all_preview_ok:
-                st.success(
-                    "✅ Verificación previa completada. Los CP están estructurados para revisión funcional."
-                )
-            else:
-                st.warning(
-                    "⚠️ La verificación previa detectó elementos faltantes. No se inventan datos; "
-                    "deben validarse funcionalmente antes de cualquier importación a Azure."
-                )
-
-            st.warning(
-                "🛑 FIN DE ESTA FASE: los CP quedan listos para revisión funcional. "
-                "Todavía no existe ninguna acción de creación, actualización o eliminación en Azure."
-            )
 
 
 
@@ -2477,6 +2410,8 @@ if st.button(
         coverage_metrics = coverage_gate_or_stop(result)
 
         st.session_state.result_json = result
+        st.session_state.azure_reference_preview = None
+        st.session_state.azure_preview_edit_mode = False
         st.session_state.excel_data = create_excel(
             result,
             selected_config,
@@ -2516,72 +2451,29 @@ if result:
     render_cu_coverage(current_coverage)
 
     # ========================================================
-    # PREVIEW DEL CP NUEVO — ACCESO DIRECTO DESPUÉS DE GENERAR
+    # REVISIÓN FUNCIONAL EN EL EDITOR EXISTENTE
     # ========================================================
-    # Antes el botón solo se dibujaba dentro de la sección de referencia,
-    # que queda arriba de la pantalla. Después de generar la HU el usuario
-    # recibía el mensaje correcto, pero no tenía un botón visible en ese
-    # mismo punto para continuar. Se conserva el mismo flujo GET/preview:
-    # NO se crea, modifica ni elimina ningún recurso en Azure.
-    reference_detail_after_generation = st.session_state.get(
-        "azure_reference_detail"
-    )
-
-    if reference_detail_after_generation:
-        st.divider()
-        st.markdown("### 🧩 Siguiente paso — Preparar CP nuevo para revisión funcional")
-        st.caption(
-            "Usa la HU como fuente funcional y el Test Case real seleccionado "
-            "como referencia estructural. Este paso genera únicamente una "
-            "vista previa; todavía no se envía ningún CP a Azure."
-        )
-
-        if st.button(
-            "🧩 Generar CP nuevo para revisión funcional",
-            key="azure_prepare_new_cp_preview_results",
-            type="primary",
-        ):
-            try:
-                generated_cases = result.get("TEST_CASES", []) or []
-                if not generated_cases:
-                    raise ValueError(
-                        "No hay Test Cases generados a partir de la HU."
-                    )
-
-                previews = []
-                for generated_case in generated_cases:
-                    previews.append(
-                        _build_reference_preview_case(
-                            reference_detail_after_generation,
-                            generated_case,
-                        )
-                    )
-
-                st.session_state.azure_reference_preview = previews
-                st.success(
-                    f"✅ Preview preparado: {len(previews)} CP(s). "
-                    "Revisa el resultado antes de cualquier envío a Azure."
-                )
-                st.rerun()
-
-            except Exception as exc:
-                st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
-    else:
-        st.info(
-            "ℹ️ Primero selecciona y compara un Test Case de referencia de Azure. "
-            "Cuando la comparación esté realizada y la HU haya generado los CP, "
-            "aquí aparecerá el botón para preparar el CP nuevo."
-        )
+    # El botón para preparar el CP permanece en la sección "Test Case de referencia".
+    # Una vez generado el PREVIEW, los CP se cargan en result["TEST_CASES"] y
+    # se muestran/editarán en la misma sección "✏️ Editar caso de prueba".
 
     # ========================================================
     # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
     # V13: un CU por Test Case + eliminar CP
     # ========================================================
     st.subheader("✏️ Editar caso de prueba")
-    st.caption(
-        "Revisa y ajusta el caso antes de descargar Excel/PDF. "
-        "Cada Test Case debe conservar un único Caso de Uso relacionado."
-    )
+    if st.session_state.get("azure_reference_preview"):
+        st.info(
+            "🔎 Revisión funcional: los CP generados desde la HU se muestran aquí mismo. "
+            "Usa el selector para revisar y ajustar uno por uno todos los CP generados. "
+            "La estructura se basa en el Test Case de referencia de Azure. "
+            "Los cambios quedan en PREVIEW y todavía NO modifican Azure."
+        )
+    else:
+        st.caption(
+            "Revisa y ajusta el caso antes de descargar Excel/PDF. "
+            "Cada Test Case debe conservar un único Caso de Uso relacionado."
+        )
 
     case_options = []
     for idx, tc in enumerate(result.get("TEST_CASES", [])):
