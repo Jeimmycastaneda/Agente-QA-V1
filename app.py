@@ -311,115 +311,6 @@ def _extract_related_cu(tc):
     return results
 
 
-def _use_case_catalog(identified_use_cases):
-    """Normaliza el catálogo de CU identificado en la HU/documentación."""
-    catalog = []
-    for cu in identified_use_cases or []:
-        if isinstance(cu, dict):
-            cid = safe_text(
-                cu.get("ID"), cu.get("id"), cu.get("Use Case ID"), cu.get("CU")
-            )
-            name = safe_text(
-                cu.get("Name"), cu.get("name"), cu.get("Title"), cu.get("Description")
-            )
-        else:
-            cid = safe_text(cu)
-            name = cid
-        if cid or name:
-            catalog.append({"id": cid, "name": name or cid})
-    return catalog
-
-
-def _resolve_related_use_cases(data, source_content=""):
-    """Resuelve Related Use Case sin inventar, siguiendo la prioridad aprobada.
-
-    1. Usa Related Use Case si ya existe.
-    2. Si falta, busca evidencia en 'Casos de Uso Relacionados'.
-    3. Si aún falta, usa el título/nombre del CU identificado en la HU.
-    4. Si no hay una coincidencia única, deja vacío y genera alerta.
-    """
-    cases = data.get("TEST_CASES", []) or []
-    catalog = _use_case_catalog(data.get("USE_CASES", []))
-    if not catalog:
-        return
-
-    source = safe_text(source_content)
-    related_block = ""
-    if source:
-        marker = re.search(r"Casos de Uso Relacionados\s*:?(.*?)(?=\n\s*(?:Precondiciones|Criterios de Aceptación|Descripción|Resultado esperado|Historia de Usuario|Casos de Uso)\b|\Z)", source, flags=re.I | re.S)
-        if marker:
-            related_block = marker.group(1)
-
-    related_norm = _normalize_cu(related_block)
-
-    for tc in cases:
-        current = safe_text(
-            tc.get("Related Use Case"),
-            tc.get("RelatedUseCase"),
-            tc.get("Caso de uso relacionado"),
-        )
-        if current and _extract_related_cu(tc):
-            continue
-
-        searchable = " ".join(
-            safe_text(tc.get(k))
-            for k in (
-                "Title", "Scenario", "Description", "Criterion",
-                "Requirement / Use Case", "use_case", "related_use_case"
-            )
-        )
-        searchable_norm = _normalize_cu(searchable)
-
-        # 2) Buscar primero en la sección explícita de Casos de Uso Relacionados.
-        matches = []
-        for cu in catalog:
-            cid = _normalize_cu(cu["id"])
-            name = _normalize_cu(cu["name"])
-            if (cid and cid in related_norm) or (name and name in related_norm):
-                matches.append(cu)
-
-        # Si el bloque tiene varias relaciones, usar la que además coincida con
-        # el escenario del CP; nunca elegir arbitrariamente entre varias.
-        if len(matches) > 1:
-            contextual = [
-                cu for cu in matches
-                if (_normalize_cu(cu["id"]) and _normalize_cu(cu["id"]) in searchable_norm)
-                or (_normalize_cu(cu["name"]) and _normalize_cu(cu["name"]) in searchable_norm)
-            ]
-            if len(contextual) == 1:
-                matches = contextual
-
-        if len(matches) == 1:
-            tc["Related Use Case"] = f"{matches[0]['id']} - {matches[0]['name']}"
-            continue
-
-        # 3) Si no existe relación explícita, buscar el título/nombre del CU
-        # dentro del escenario/Descripción generado a partir de la HU.
-        title_matches = []
-        for cu in catalog:
-            name_norm = _normalize_cu(cu["name"])
-            cid_norm = _normalize_cu(cu["id"])
-            if (name_norm and name_norm in searchable_norm) or (cid_norm and cid_norm in searchable_norm):
-                title_matches.append(cu)
-
-        if len(title_matches) == 1:
-            tc["Related Use Case"] = f"{title_matches[0]['id']} - {title_matches[0]['name']}"
-            continue
-
-        # 4) No inventar. La generación queda trazable y el dato se valida antes
-        # de crear cualquier CP en Azure.
-        tc["Related Use Case"] = ""
-        alerts = tc.get("Alerts")
-        if not isinstance(alerts, list):
-            alerts = []
-            tc["Alerts"] = alerts
-        alerts.append({
-            "Alert": "Caso de uso relacionado no identificado de forma inequívoca",
-            "Reason": "No se encontró una relación explícita ni una coincidencia única con los Casos de Uso identificados en la Historia de Usuario.",
-            "Validation Required": "Validar el Caso de Uso relacionado con el equipo funcional antes de crear el CP en Azure.",
-        })
-
-
 def calculate_cu_coverage(cases, identified_use_cases):
     """Mínimo 1 CP por cada CU y exactamente 1 CU por CP."""
     cu_map = {}
@@ -568,7 +459,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V36-ULTIMOS10-REFERENCIA-Y-REVISION-FUNCIONAL"
+APP_VERSION = "V37-ULTIMOS10-HU-REFERENCIA-PREVIEW-REVISION"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1285,7 +1176,10 @@ def generate_qa_data(
         "No conviertas Steps en CP. "
         "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
         "debe validarse contra los CU reales identificados en USE_CASES. "
-        "REGLA OBLIGATORIA PARA CASO DE USO RELACIONADO: si Related Use Case no está definido, busca primero la relación en la sección o campo 'Casos de Uso Relacionados' de la Historia de Usuario/documentación. Si allí no existe una relación utilizable, toma el título/nombre del Caso de Uso que aparece en la Historia de Usuario y úsalo como Caso de uso relacionado, conservando su ID cuando esté disponible. Solo utiliza Casos de Uso presentes en USE_CASES. Si no existe evidencia suficiente o hay más de una coincidencia posible, no inventes: deja el campo vacío y genera ALERTA para validación funcional. "
+        "Para determinar Related Use Case aplica esta prioridad estricta: 1) buscar el CU en la Historia de Usuario/documentación; "
+        "2) buscarlo específicamente en la sección 'Casos de Uso Relacionados' (incluyendo variantes de mayúsculas/minúsculas y acentos); "
+        "3) si definitivamente no aparece allí, utilizar el título/nombre del Caso de Uso que esté indicado en la Historia de Usuario. "
+        "No inventar un CU ni dejarlo como None si existe un título de CU en la fuente. Si no existe ninguna referencia en la fuente, marcarlo como pendiente y generar ALERTA. "
         "Cuando la navegación no esté definida explícitamente, puedes redactar una opción posible de acceso "
         "solo si existe evidencia suficiente en la documentación. No uses las etiquetas Ruta estimada o "
         "Navegación sugerida, no inventes botones, URLs, menús, pantallas ni rutas, y conserva siempre las "
@@ -1338,7 +1232,6 @@ def generate_qa_data(
                     data = json.loads(match.group(1))
 
                 validated = validate_qa_structure(data)
-                _resolve_related_use_cases(validated, source_content)
                 validate_minimum_cu_coverage(validated)
 
                 st.session_state.quota_exceeded = False
@@ -2317,141 +2210,131 @@ with st.sidebar:
         if all(checks.values()):
             st.success(
                 "✅ La referencia contiene la estructura aprobada. "
-                "Puede utilizarse como referencia completa para preparar un CP nuevo en PREVIEW."
+                "Ahora el agente puede preparar un CP nuevo en PREVIEW, sin enviarlo a Azure."
             )
         else:
             st.warning(
-                "⚠️ La referencia seleccionada no contiene todos los elementos esperados. "
-                "Se conserva como referencia visual/estructural. Los elementos faltantes "
-                "NO se inventan desde Azure; el CP nuevo se construye con nuestra estructura aprobada "
-                "y la documentación de la HU."
+                "⚠️ La referencia no contiene todos los elementos esperados. "
+                "Se conserva como referencia, pero no se inventan los elementos faltantes."
             )
 
         current_result = st.session_state.get("result_json")
         if current_result:
-            st.markdown("### 4️⃣ Preparar nuevo Test Case — PREVIEW")
+            st.markdown("### 4️⃣ Generar CP nuevo con base en la HU + referencia Azure — PREVIEW")
             st.caption(
-                "El Test Case de Azure se utiliza únicamente como referencia de estructura y estilo. "
-                "Nuestra estructura aprobada y la HU/documentación siguen siendo la fuente funcional. "
+                "El CP nuevo se toma de la HU/documentación generada por el Agente QA y se presenta "
+                "con la estructura observada en el Test Case real de Azure seleccionado. "
+                "Los datos funcionales NO se copian desde Azure: se toman de la HU. "
                 "En esta etapa NO se crea ni modifica ningún recurso en Azure."
             )
             if not all(checks.values()):
-                st.info(
-                    "ℹ️ La referencia no cumple al 100 %, pero podemos continuar con el PREVIEW. "
-                    "Los faltantes quedan sujetos a nuestra estructura aprobada y a revisión funcional."
+                st.warning(
+                    "⚠️ La referencia no contiene todos los elementos de la estructura aprobada. "
+                    "Se usará únicamente como referencia visual/estructural; los elementos faltantes "
+                    "se tomarán de la HU si existen y, si no existen, quedarán como faltantes con alerta."
                 )
             if st.button(
-                "🧩 Preparar CP nuevo con la estructura aprobada",
+                "🧩 Generar CP nuevo para revisión funcional",
                 key="azure_prepare_new_cp_preview",
             ):
                 try:
                     generated_cases = current_result.get("TEST_CASES", []) or []
                     if not generated_cases:
-                        raise ValueError("No hay Test Cases generados para preparar el preview.")
+                        raise ValueError("No hay Test Cases generados a partir de la HU.")
 
-                    # La resolución del Caso de Uso ya se ejecutó durante la validación
-                    # de la generación. Aquí se conserva la regla aprobada: Related Use Case
-                    # -> Casos de Uso Relacionados -> título del CU de la HU -> alerta.
-                    preview_case = _build_reference_preview_case(
-                        reference_detail,
-                        generated_cases[0],
-                    )
-                    st.session_state.azure_reference_preview = preview_case
-                    st.session_state.azure_functional_review_decision = "Pendiente"
+                    # PREVIEW: un CP por cada CU generado, sin POST a Azure.
+                    previews = []
+                    for generated_case in generated_cases:
+                        previews.append(
+                            _build_reference_preview_case(
+                                reference_detail,
+                                generated_case,
+                            )
+                        )
+                    st.session_state.azure_reference_preview = previews
                 except Exception as exc:
                     st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
 
         preview = st.session_state.get("azure_reference_preview")
         if preview:
-            st.markdown("### 👀 CP nuevo antes de enviarlo a Azure")
+            preview_list = preview if isinstance(preview, list) else [preview]
+            st.markdown("### 👀 CP nuevo generado desde la HU — antes de enviarlo a Azure")
             st.info(
-                "PUNTO DE CONTROL: este CP es únicamente una vista previa. "
-                "No se ha realizado ningún POST/creación en Azure DevOps."
+                "PUNTO DE CONTROL: esta salida es únicamente una vista previa para revisión funcional. "
+                "La HU es la fuente de verdad del contenido; el Test Case real de Azure se usa como referencia "
+                "de estructura. No se ha realizado ningún POST/creación en Azure DevOps."
             )
-            st.markdown(f"**Title:** {safe_text(preview.get('Title'))}")
 
-            st.markdown("#### Description")
-            for label, value in _reference_description_sections(preview.get("Description", "")):
-                with st.container(border=True):
-                    st.markdown(f"**{label}**")
-                    st.write(value)
+            review_rows = []
+            for idx, preview_case in enumerate(preview_list, start=1):
+                st.markdown(f"#### CP {idx}: {safe_text(preview_case.get('ID'), f'CP-PREVIEW-{idx:05d}')}")
+                st.markdown(f"**Title:** {safe_text(preview_case.get('Title'))}")
+                st.caption(
+                    f"Referencia Azure: {safe_text(preview_case.get('reference_test_case_id'))} — "
+                    f"{safe_text(preview_case.get('reference_test_case_title'))}"
+                )
 
-            st.markdown("#### Steps")
-            preview_steps = pd.DataFrame(preview.get("Steps") or [])
-            if not preview_steps.empty:
-                cols = [c for c in ["Step #", "Action", "Expected value"] if c in preview_steps.columns]
-                st.dataframe(preview_steps[cols], width="stretch", hide_index=True)
+                st.markdown("##### Description")
+                for label, value in _reference_description_sections(preview_case.get("Description", "")):
+                    with st.container(border=True):
+                        st.markdown(f"**{label}**")
+                        st.write(value)
+
+                st.markdown("##### Steps")
+                preview_steps = pd.DataFrame(preview_case.get("Steps") or [])
+                if not preview_steps.empty:
+                    cols = [c for c in ["Step #", "Action", "Expected value"] if c in preview_steps.columns]
+                    st.dataframe(preview_steps[cols], width="stretch", hide_index=True)
+                else:
+                    st.warning("⚠️ El CP nuevo no tiene Steps para revisar.")
+
+                # Validación funcional previa: no envía nada a Azure.
+                desc_text = safe_text(preview_case.get("Description"))
+                step_rows = preview_case.get("Steps") or []
+                preview_checks = {
+                    "Producto dentro de Description": "producto:" in desc_text.lower(),
+                    "Módulo dentro de Description": ("módulo:" in desc_text.lower() or "modulo:" in desc_text.lower()),
+                    "Descripción dentro de Description": ("descripción:" in desc_text.lower() or "descripcion:" in desc_text.lower()),
+                    "Resultado esperado dentro de Description": "resultado esperado de la prueba:" in desc_text.lower(),
+                    "Precondiciones dentro de Description": "precondiciones:" in desc_text.lower(),
+                    "Caso de uso relacionado dentro de Description": "caso de uso relacionado:" in desc_text.lower(),
+                    "Steps con Action + Expected": bool(step_rows) and all(
+                        safe_text(s.get("Action")) and safe_text(s.get("Expected value"))
+                        for s in step_rows
+                    ),
+                }
+                for label, ok in preview_checks.items():
+                    review_rows.append({
+                        "CP": safe_text(preview_case.get("ID"), f"CP-PREVIEW-{idx:05d}"),
+                        "Elemento": label,
+                        "Cumple": "✅" if ok else "⚠️",
+                    })
+                st.markdown("##### 🔎 Verificación previa del CP")
+                st.dataframe(
+                    pd.DataFrame([
+                        {"Elemento": label, "Cumple": "✅" if ok else "⚠️"}
+                        for label, ok in preview_checks.items()
+                    ]),
+                    width="stretch",
+                    hide_index=True,
+                )
+                st.divider()
+
+            all_preview_ok = all(row["Cumple"] == "✅" for row in review_rows) if review_rows else False
+            if all_preview_ok:
+                st.success(
+                    "✅ Verificación previa completada. Los CP están estructurados para revisión funcional."
+                )
             else:
-                st.warning("⚠️ El CP nuevo no tiene Steps para revisar.")
+                st.warning(
+                    "⚠️ La verificación previa detectó elementos faltantes. No se inventan datos; "
+                    "deben validarse funcionalmente antes de cualquier importación a Azure."
+                )
 
             st.warning(
-                "🛑 FIN DE ESTA FASE: el CP queda listo para revisión funcional. "
+                "🛑 FIN DE ESTA FASE: los CP quedan listos para revisión funcional. "
                 "Todavía no existe ninguna acción de creación, actualización o eliminación en Azure."
             )
-
-            # ============================================================
-            # REVISION FUNCIONAL — SIN ESCRITURA EN AZURE
-            # ============================================================
-            st.markdown("### 👩‍💻 5️⃣ Revisión funcional")
-            st.caption(
-                "Esta etapa permite validar manualmente el CP preparado antes de cualquier futura integración de creación en Azure. "
-                "No realiza POST, PATCH ni DELETE en Azure DevOps."
-            )
-
-            review_product = bool(safe_text(preview.get("Product")))
-            review_module = bool(safe_text(preview.get("Module")))
-            review_description = bool(safe_text(preview.get("Description")))
-            review_expected = bool(safe_text(preview.get("Expected Result")))
-            review_preconditions = bool(safe_text(preview.get("Preconditions")))
-            review_related = bool(safe_text(preview.get("Related Use Case")))
-            review_steps = bool(preview.get("Steps")) and all(
-                safe_text(step.get("Action")) and safe_text(step.get("Expected value"))
-                for step in (preview.get("Steps") or [])
-            )
-
-            review_rows = [
-                {"Validación funcional": "Producto en Description", "Estado": "✅" if review_product else "⚠️"},
-                {"Validación funcional": "Módulo en Description", "Estado": "✅" if review_module else "⚠️"},
-                {"Validación funcional": "Descripción funcional completa", "Estado": "✅" if review_description else "⚠️"},
-                {"Validación funcional": "Resultado esperado en Description", "Estado": "✅" if review_expected else "⚠️"},
-                {"Validación funcional": "Precondiciones en Description", "Estado": "✅" if review_preconditions else "⚠️"},
-                {"Validación funcional": "Caso de uso relacionado identificado", "Estado": "✅" if review_related else "⚠️"},
-                {"Validación funcional": "Steps con Action + Expected", "Estado": "✅" if review_steps else "⚠️"},
-            ]
-            st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
-
-            review_ok = all([
-                review_product, review_module, review_description, review_expected,
-                review_preconditions, review_related, review_steps,
-            ])
-
-            if not review_ok:
-                st.error(
-                    "❌ La revisión funcional no puede aprobarse todavía. "
-                    "Hay elementos que requieren validación funcional."
-                )
-            else:
-                st.success(
-                    "✅ El CP contiene la estructura mínima preparada para revisión funcional. "
-                    "La aprobación sigue siendo manual y no crea el Test Case en Azure."
-                )
-
-            review_decision = st.radio(
-                "Decisión de la revisión funcional",
-                ["Pendiente", "Aprobado funcionalmente", "Requiere ajustes"],
-                key="azure_functional_review_decision",
-                horizontal=True,
-            )
-
-            if review_decision == "Aprobado funcionalmente" and review_ok:
-                st.success(
-                    "🟢 Revisión funcional aprobada. El CP queda preparado como siguiente insumo. "
-                    "No se ha enviado ni creado en Azure DevOps."
-                )
-            elif review_decision == "Requiere ajustes":
-                st.warning(
-                    "🟡 El CP requiere ajustes funcionales. Se mantiene en PREVIEW y no se realiza ninguna escritura en Azure."
-                )
 
 
 
@@ -2559,7 +2442,9 @@ if st.button(
 
         st.success(
             f"✅ Generación completada: "
-            f"{len(result['TEST_CASES'])} casos."
+            f"{len(result['TEST_CASES'])} casos desde la HU. "
+            "Ahora vuelve a la sección 'Test Case de referencia' y pulsa "
+            "'Generar CP nuevo para revisión funcional'."
         )
 
     except Exception as exc:
