@@ -11,7 +11,211 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
-from azure_devops import (AzureDevOpsError, test_connection, list_test_plans, get_test_plan, list_test_suites, list_test_cases, get_test_case_detail, compare_test_case_structure)
+
+import base64
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+
+class AzureDevOpsError(RuntimeError):
+    pass
+
+def _az_config():
+    try:
+        secrets = st.secrets
+    except Exception:
+        secrets = {}
+    return {
+        "org": str(secrets.get("AZURE_DEVOPS_ORG", os.getenv("AZURE_DEVOPS_ORG", ""))).strip(),
+        "project": str(secrets.get("AZURE_DEVOPS_PROJECT", os.getenv("AZURE_DEVOPS_PROJECT", ""))).strip(),
+        "pat": str(secrets.get("AZURE_DEVOPS_PAT", os.getenv("AZURE_DEVOPS_PAT", ""))).strip(),
+    }
+
+def _az_validate(cfg):
+    missing = [k for k in ("org", "project", "pat") if not cfg.get(k)]
+    if missing:
+        raise AzureDevOpsError("Faltan secretos de Azure DevOps: " + ", ".join(missing))
+
+def _az_get_json(url, pat):
+    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
+    req = Request(
+        url,
+        method="GET",
+        headers={
+            "Authorization": f"Basic {token}",
+            "Accept": "application/json",
+            "User-Agent": "Agente-QA-Streamlit/1.0",
+        },
+    )
+    try:
+        with urlopen(req, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8")), response.headers
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        except Exception:
+            pass
+        if exc.code in (401, 403):
+            raise AzureDevOpsError(
+                f"Azure rechazó la autenticación/autorización (HTTP {exc.code}). "
+                "Verifica el PAT, su vigencia y sus scopes."
+            ) from exc
+        if exc.code == 404:
+            raise AzureDevOpsError(
+                "No se encontró el proyecto o el recurso de Test Plans. "
+                "Verifica AZURE_DEVOPS_ORG y AZURE_DEVOPS_PROJECT."
+            ) from exc
+        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
+    except URLError as exc:
+        raise AzureDevOpsError(
+            f"No fue posible comunicarse con Azure DevOps: {exc.reason}"
+        ) from exc
+
+def test_connection():
+    cfg = _az_config()
+    _az_validate(cfg)
+    org = quote(cfg["org"], safe="")
+    project = quote(cfg["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitemtypes/"
+        f"Test%20Case?api-version=7.1"
+    )
+    payload, _ = _az_get_json(url, cfg["pat"])
+    return {
+        "organization": cfg["org"],
+        "project": cfg["project"],
+        "work_item_type": payload.get("name", "Test Case"),
+        "message": "Conexión correcta. Solo se realizó una consulta de lectura.",
+    }
+
+def _az_testplan_url(cfg, path):
+    return (
+        f"https://dev.azure.com/{quote(cfg['org'], safe='')}/"
+        f"{quote(cfg['project'], safe='')}/_apis/testplan/{path}"
+    )
+
+def list_test_plans(limit=10):
+    # SOLO GET. Trae únicamente los 10 Test Plans más recientes por ID.
+    cfg = _az_config()
+    _az_validate(cfg)
+    params = urlencode({"api-version": "7.1", "$top": int(limit)})
+    url = _az_testplan_url(cfg, "plans") + "?" + params
+    payload, _ = _az_get_json(url, cfg["pat"])
+    plans = payload.get("value") or []
+    plans = sorted(plans, key=lambda x: int(x.get("id") or 0), reverse=True)[:int(limit)]
+    rows = []
+    for p in plans:
+        rows.append({
+            "id": p.get("id"),
+            "name": p.get("name", ""),
+            "state": p.get("state", ""),
+            "area_path": p.get("areaPath", ""),
+            "iteration": p.get("iteration", ""),
+            "start_date": p.get("startDate", ""),
+            "end_date": p.get("endDate", ""),
+        })
+    return {
+        "ok": True,
+        "organization": cfg["org"],
+        "project": cfg["project"],
+        "count": len(rows),
+        "plans": rows,
+        "message": (
+            "Consulta correcta. Solo se consultaron los 10 Test Plans más recientes "
+            "por ID; no se creó, modificó ni eliminó ningún recurso."
+        ),
+    }
+
+def list_test_suites(plan_id):
+    cfg = _az_config()
+    _az_validate(cfg)
+    path = f"Plans/{quote(str(plan_id), safe='')}/suites"
+    payload, _ = _az_get_json(
+        _az_testplan_url(cfg, path) + "?api-version=7.1",
+        cfg["pat"],
+    )
+    rows = []
+    for s in payload.get("value") or []:
+        plan = s.get("plan") if isinstance(s.get("plan"), dict) else {}
+        parent = s.get("parentSuite") if isinstance(s.get("parentSuite"), dict) else {}
+        rows.append({
+            "id": s.get("id"),
+            "name": s.get("name", ""),
+            "suite_type": s.get("suiteType", ""),
+            "plan_id": plan.get("id", plan_id),
+            "parent_suite": parent.get("id"),
+        })
+    return rows
+
+def list_test_cases(plan_id, suite_id):
+    cfg = _az_config()
+    _az_validate(cfg)
+    path = (
+        f"Plans/{quote(str(plan_id), safe='')}/Suites/"
+        f"{quote(str(suite_id), safe='')}/TestCase"
+    )
+    payload, _ = _az_get_json(
+        _az_testplan_url(cfg, path) + "?api-version=7.1",
+        cfg["pat"],
+    )
+    rows = []
+    for item in payload.get("value") or []:
+        wi = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
+        rows.append({
+            "id": wi.get("id"),
+            "title": wi.get("name") or wi.get("title") or "",
+            "raw": item,
+        })
+    return rows
+
+def _az_parse_steps_xml(xml_text):
+    if not xml_text:
+        return []
+    decoded = _html.unescape(str(xml_text))
+    steps = []
+    for match in re.finditer(r"<step\b[^>]*>.*?</step>", decoded, flags=re.I | re.S):
+        node = match.group(0)
+        vals = re.findall(
+            r"<parameterizedString[^>]*>(.*?)</parameterizedString>",
+            node,
+            flags=re.I | re.S,
+        )
+        clean = []
+        for value in vals[:2]:
+            value = re.sub(r"<[^>]+>", "", value)
+            clean.append(_html.unescape(value).strip())
+        if clean:
+            steps.append({
+                "Step #": len(steps) + 1,
+                "Action": clean[0] if len(clean) > 0 else "",
+                "Expected value": clean[1] if len(clean) > 1 else "",
+            })
+    return steps
+
+def get_test_case_detail(test_case_id):
+    cfg = _az_config()
+    _az_validate(cfg)
+    org = quote(cfg["org"], safe="")
+    project = quote(cfg["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
+        f"{quote(str(test_case_id), safe='')}?api-version=7.1"
+    )
+    payload, _ = _az_get_json(url, cfg["pat"])
+    fields = payload.get("fields") or {}
+    return {
+        "id": payload.get("id"),
+        "title": fields.get("System.Title", ""),
+        "description": fields.get("System.Description", "") or "",
+        "steps": _az_parse_steps_xml(fields.get("Microsoft.VSTS.TCM.Steps", "") or ""),
+        "area_path": fields.get("System.AreaPath", ""),
+        "iteration_path": fields.get("System.IterationPath", ""),
+        "state": fields.get("System.State", ""),
+        "work_item_type": fields.get("System.WorkItemType", "Test Case"),
+        "raw_fields": fields,
+    }
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -204,7 +408,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V35-EDICION-Y-DESCRIPTION-SIN-RUTA-ESTIMADA"
+APP_VERSION = "V36-ULTIMOS10-REFERENCIA-Y-PREVIEW-CP"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1580,6 +1784,101 @@ def coverage_gate_or_stop(data):
     return metrics
 
 
+
+# ============================================================
+# REFERENCIA AZURE — SOLO LECTURA / PREVIEW
+# ============================================================
+_REFERENCE_LABELS = [
+    "Producto:",
+    "Módulo:",
+    "Descripción:",
+    "Resultado esperado de la prueba:",
+    "Precondiciones:",
+    "Caso de uso relacionado:",
+]
+
+def _reference_compare(detail):
+    description = safe_text(detail.get("description"))
+    steps = detail.get("steps") or []
+    low = description.lower()
+    return {
+        "Producto dentro de Description": "producto:" in low,
+        "Módulo dentro de Description": "módulo:" in low or "modulo:" in low,
+        "Descripción dentro de Description": "descripción:" in low or "descripcion:" in low,
+        "Resultado esperado dentro de Description": "resultado esperado de la prueba:" in low,
+        "Precondiciones dentro de Description": "precondiciones:" in low,
+        "Caso de uso relacionado dentro de Description": "caso de uso relacionado:" in low,
+        "Steps con Action + Expected": bool(steps) and all(
+            safe_text(s.get("Action")) and safe_text(s.get("Expected value"))
+            for s in steps
+        ),
+    }
+
+def _reference_description_pretty(description):
+    raw = _html.unescape(safe_text(description))
+    raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
+    raw = re.sub(r"(?i)</(div|p|li|ul|blockquote|strong|b)>", "\n", raw)
+    raw = re.sub(r"(?i)<li[^>]*>", "• ", raw)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    raw = _html.unescape(raw)
+    raw = raw.replace("\xa0", " ")
+    raw = re.sub(r"[ \t]+", " ", raw)
+    raw = re.sub(r"\n\s*\n\s*\n+", "\n\n", raw).strip()
+    return raw
+
+def _reference_description_sections(description):
+    text = _reference_description_pretty(description)
+    sections = []
+    for idx, label in enumerate(_REFERENCE_LABELS):
+        start = re.search(re.escape(label), text, flags=re.I)
+        if not start:
+            sections.append((label, "No encontrado en la referencia."))
+            continue
+        content_start = start.end()
+        next_positions = []
+        for next_label in _REFERENCE_LABELS[idx + 1:]:
+            m = re.search(re.escape(next_label), text[content_start:], flags=re.I)
+            if m:
+                next_positions.append(content_start + m.start())
+        end = min(next_positions) if next_positions else len(text)
+        content = text[content_start:end].strip(" \n:-")
+        sections.append((label, content or "Sin contenido visible."))
+    return sections
+
+def _build_reference_preview_case(reference_detail, generated_case):
+    tc = dict(generated_case or {})
+    reference_sections = dict(_reference_description_sections(reference_detail.get("description", "")))
+
+    product = safe_text(tc.get("Product"), reference_sections.get("Producto:", ""), "Pendiente")
+    module = safe_text(tc.get("Module"), reference_sections.get("Módulo:", ""), "Pendiente")
+    description = safe_text(tc.get("Description"), tc.get("Scenario"), "Pendiente")
+    expected = safe_text(tc.get("Expected Result"), "Pendiente")
+    preconditions = safe_text(tc.get("Preconditions"), "Pendiente")
+    related = safe_text(tc.get("Related Use Case"), "Pendiente")
+
+    description_structured = build_azure_description(
+        product=product,
+        module=module,
+        description=description,
+        expected=expected,
+        preconditions=preconditions,
+        related_use_case=related,
+    )
+
+    return {
+        "ID": safe_text(tc.get("ID")),
+        "Title": build_case_title(tc, safe_text(tc.get("ID"), "CP-PREVIEW")),
+        "Product": product,
+        "Module": module,
+        "Description": description_structured,
+        "Preconditions": preconditions,
+        "Expected Result": expected,
+        "Related Use Case": related,
+        "Steps": safe_steps(tc),
+        "reference_test_case_id": reference_detail.get("id"),
+        "reference_test_case_title": reference_detail.get("title"),
+    }
+
 # ============================================================
 # INTERFAZ
 # ============================================================
@@ -1598,6 +1897,19 @@ if "excel_data" not in st.session_state:
     st.session_state.excel_data = None
 if "pdf_data" not in st.session_state:
     st.session_state.pdf_data = None
+
+for _key, _default in {
+    "azure_reference_plans": [],
+    "azure_reference_plan_id": None,
+    "azure_reference_suites": [],
+    "azure_reference_suite_id": None,
+    "azure_reference_cases": [],
+    "azure_reference_case_id": None,
+    "azure_reference_detail": None,
+    "azure_reference_preview": None,
+}.items():
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
 
 st.title(f"🤖 Agente QA {APP_VERSION} — Generador de Casos de Prueba")
 st.caption(
@@ -1668,105 +1980,202 @@ with st.sidebar:
         except Exception as exc:
             st.error(f"❌ Error inesperado al probar Azure DevOps: {exc}")
 
+    st.markdown("### 📋 Test Plans")
+    st.caption(
+        "Consulta de solo lectura. Solo se muestran los 10 Test Plans más recientes. "
+        "No crea, edita ni elimina Test Plans, Suites ni Test Cases."
+    )
 
-    # ========================================================
-    # AZURE DEVOPS — REFERENCIA DE ESTRUCTURA (SOLO LECTURA)
-    # Este flujo permanece dentro del sidebar para que siempre sea visible.
-    # NO contiene operaciones POST/PATCH/PUT/DELETE.
-    # ========================================================
-    st.divider()
-    st.subheader("🔎 Referencia de Test Case")
-    st.caption("Solo lectura: selecciona un Test Plan, Suite y Test Case para comparar su estructura. No crea ni modifica Azure.")
-
-    if "az_ref_plans" not in st.session_state: st.session_state.az_ref_plans = []
-    if "az_ref_suites" not in st.session_state: st.session_state.az_ref_suites = []
-    if "az_ref_cases" not in st.session_state: st.session_state.az_ref_cases = []
-    if "az_ref_detail" not in st.session_state: st.session_state.az_ref_detail = None
-
-    if st.button("📋 Consultar 10 Test Plans", key="az_ref_plans_btn"):
+    if st.button("📋 Consultar 10 Test Plans", key="azure_list_test_plans"):
         try:
             with st.spinner("Consultando los 10 Test Plans más recientes..."):
-                response = list_test_plans(limit=10)
-            st.session_state.az_ref_plans = response.get("plans", [])
-            st.session_state.az_ref_suites = []
-            st.session_state.az_ref_cases = []
-            st.session_state.az_ref_detail = None
-            st.success(f"✅ {len(st.session_state.az_ref_plans)} Test Plans consultados. Solo GET.")
-        except Exception as exc:
+                plans_result = list_test_plans(limit=10)
+            st.session_state.azure_reference_plans = plans_result.get("plans", [])
+            st.session_state.azure_reference_plan_id = None
+            st.session_state.azure_reference_suites = []
+            st.session_state.azure_reference_suite_id = None
+            st.session_state.azure_reference_cases = []
+            st.session_state.azure_reference_case_id = None
+            st.session_state.azure_reference_detail = None
+            st.session_state.azure_reference_preview = None
+            st.success(
+                f"✅ Consulta correcta: {len(st.session_state.azure_reference_plans)} "
+                "Test Plan(s) más recientes."
+            )
+            st.info(plans_result["message"])
+        except AzureDevOpsError as exc:
             st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
+        except Exception as exc:
+            st.error(f"❌ Error inesperado al consultar Test Plans: {exc}")
 
-    plans = st.session_state.az_ref_plans
+    plans = st.session_state.get("azure_reference_plans", [])
     if plans:
-        plan_labels = [f"{p.get('id')} — {p.get('name','')}" for p in plans]
-        selected_plan_label = st.selectbox("1️⃣ Test Plan", plan_labels, key="az_ref_plan_select")
-        selected_plan = plans[plan_labels.index(selected_plan_label)]
-        if st.button("🔎 Consultar Suites", key="az_ref_suites_btn"):
+        plan_options = [f"{p.get('id')} — {p.get('name', '')}" for p in plans]
+        selected_plan_label = st.selectbox(
+            "1️⃣ Test Plan",
+            plan_options,
+            key="azure_reference_plan_select",
+        )
+        selected_plan_id = plans[plan_options.index(selected_plan_label)].get("id")
+
+        if st.button("🔎 Consultar Suites", key="azure_reference_get_suites"):
             try:
-                with st.spinner("Consultando Suites..."):
-                    st.session_state.az_ref_suites = list_test_suites(selected_plan.get("id"))
-                st.session_state.az_ref_cases = []
-                st.session_state.az_ref_detail = None
-                st.success(f"✅ {len(st.session_state.az_ref_suites)} Suite(s). Solo GET.")
-            except Exception as exc:
+                with st.spinner("Consultando Suites del Test Plan seleccionado..."):
+                    suites = list_test_suites(selected_plan_id)
+                st.session_state.azure_reference_plan_id = selected_plan_id
+                st.session_state.azure_reference_suites = suites
+                st.session_state.azure_reference_suite_id = None
+                st.session_state.azure_reference_cases = []
+                st.session_state.azure_reference_case_id = None
+                st.session_state.azure_reference_detail = None
+                st.session_state.azure_reference_preview = None
+                st.success(f"✅ {len(suites)} Suite(s) encontradas.")
+            except AzureDevOpsError as exc:
                 st.error(f"❌ No se pudieron consultar las Suites: {exc}")
+            except Exception as exc:
+                st.error(f"❌ Error inesperado al consultar Suites: {exc}")
 
-    suites = st.session_state.az_ref_suites
+    suites = st.session_state.get("azure_reference_suites", [])
     if suites:
-        suite_labels = [f"{s.get('id')} — {s.get('name','')}" for s in suites]
-        selected_suite_label = st.selectbox("2️⃣ Suite", suite_labels, key="az_ref_suite_select")
-        selected_suite = suites[suite_labels.index(selected_suite_label)]
-        if st.button("🧪 Consultar Test Cases", key="az_ref_cases_btn"):
+        suite_options = [f"{s.get('id')} — {s.get('name', '')}" for s in suites]
+        selected_suite_label = st.selectbox(
+            "2️⃣ Suite",
+            suite_options,
+            key="azure_reference_suite_select",
+        )
+        selected_suite_id = suites[suite_options.index(selected_suite_label)].get("id")
+
+        if st.button("🔎 Consultar Test Cases", key="azure_reference_get_cases"):
             try:
-                with st.spinner("Consultando Test Cases..."):
-                    st.session_state.az_ref_cases = list_test_cases(selected_plan.get("id"), selected_suite.get("id"))
-                st.session_state.az_ref_detail = None
-                st.success(f"✅ {len(st.session_state.az_ref_cases)} Test Case(s). Solo GET.")
-            except Exception as exc:
+                plan_id_for_suite = st.session_state.get("azure_reference_plan_id") or selected_plan_id
+                with st.spinner("Consultando Test Cases de la Suite seleccionada..."):
+                    cases = list_test_cases(plan_id_for_suite, selected_suite_id)
+                st.session_state.azure_reference_suite_id = selected_suite_id
+                st.session_state.azure_reference_cases = cases
+                st.session_state.azure_reference_case_id = None
+                st.session_state.azure_reference_detail = None
+                st.session_state.azure_reference_preview = None
+                st.success(f"✅ {len(cases)} Test Case(s) encontrados.")
+            except AzureDevOpsError as exc:
                 st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
-
-    cases = st.session_state.az_ref_cases
-    if cases:
-        case_labels = [f"{c.get('id')} — {c.get('title','')}" for c in cases]
-        selected_case_label = st.selectbox("3️⃣ Test Case de referencia", case_labels, key="az_ref_case_select")
-        selected_az_case = cases[case_labels.index(selected_case_label)]
-        if st.button("🔬 Consultar y comparar", key="az_ref_compare_btn"):
-            try:
-                with st.spinner("Consultando detalle y comparando estructura..."):
-                    detail = get_test_case_detail(selected_az_case.get("id"))
-                    comparison = compare_test_case_structure(detail)
-                st.session_state.az_ref_detail = {"detail": detail, "comparison": comparison}
-                st.success("✅ Comparación realizada. Solo GET. El flujo se detiene aquí.")
             except Exception as exc:
-                st.error(f"❌ No se pudo consultar el detalle: {exc}")
+                st.error(f"❌ Error inesperado al consultar Test Cases: {exc}")
 
-# El detalle se muestra en el área principal, para que sea legible.
-ref = st.session_state.get("az_ref_detail")
-if ref:
-    detail = ref["detail"]
-    comparison = ref["comparison"]
-    st.divider()
-    st.markdown("### 📌 Test Case de referencia")
-    st.write(f"**ID:** {detail.get('id')}  |  **Title:** {detail.get('title','')}")
-    st.write(f"**State:** {detail.get('state','')}  |  **Area Path:** {detail.get('area_path','')}")
-    st.markdown("### 📝 Description real de Azure")
-    st.markdown(detail.get("description") or "_Sin Description_")
-    st.markdown("### 🧪 Steps reales de Azure")
-    if detail.get("steps"):
-        st.dataframe(pd.DataFrame(detail["steps"], columns=["Step #", "Action", "Expected value"]), hide_index=True, width="stretch")
-    else:
-        st.warning("El Test Case no tiene Steps interpretables.")
-    st.markdown("### 🔍 Comparación contra nuestra estructura aprobada")
-    checks = {
-        "Producto dentro de Description": comparison["description_has_product"],
-        "Módulo dentro de Description": comparison["description_has_module"],
-        "Descripción dentro de Description": comparison["description_has_description"],
-        "Resultado esperado dentro de Description": comparison["description_has_expected"],
-        "Precondiciones dentro de Description": comparison["description_has_preconditions"],
-        "Caso de uso relacionado dentro de Description": comparison["description_has_related_use_case"],
-        "Steps con Action + Expected": comparison["steps_have_action_expected"],
-    }
-    st.table(pd.DataFrame([{"Elemento": k, "Cumple": "✅" if v else "⚠️"} for k,v in checks.items()]))
-    st.warning("🛑 PUNTO DE CONTROL: aquí termina esta fase. Solo se realizaron consultas GET. No se crea, modifica ni elimina ningún recurso de Azure.")
+    cases = st.session_state.get("azure_reference_cases", [])
+    if cases:
+        st.markdown("### 3️⃣ Test Case de referencia")
+        case_options = [f"{c.get('id')} — {c.get('title', '')}" for c in cases]
+        selected_case_label = st.selectbox(
+            "Selecciona un Test Case real de Azure para comparar su estructura",
+            case_options,
+            key="azure_reference_case_select",
+        )
+        selected_case_id = cases[case_options.index(selected_case_label)].get("id")
+
+        if st.button("🔬 Consultar y comparar", key="azure_reference_compare"):
+            try:
+                with st.spinner("Leyendo el Test Case real de Azure..."):
+                    detail = get_test_case_detail(selected_case_id)
+                st.session_state.azure_reference_case_id = selected_case_id
+                st.session_state.azure_reference_detail = detail
+                st.session_state.azure_reference_preview = None
+                st.success("✅ Comparación realizada. Solo se ejecutaron consultas GET.")
+            except AzureDevOpsError as exc:
+                st.error(f"❌ No se pudo consultar el Test Case de referencia: {exc}")
+            except Exception as exc:
+                st.error(f"❌ Error inesperado al consultar el Test Case: {exc}")
+
+    reference_detail = st.session_state.get("azure_reference_detail")
+    if reference_detail:
+        st.markdown("## 📌 Test Case de referencia")
+        st.markdown(
+            f"**ID:** {safe_text(reference_detail.get('id'))}  \n"
+            f"**Título:** {safe_text(reference_detail.get('title'))}  \n"
+            f"**Estado:** {safe_text(reference_detail.get('state'))}  \n"
+            f"**Area Path:** {safe_text(reference_detail.get('area_path'))}"
+        )
+
+        st.markdown("### 📝 Description real de Azure")
+        for label, value in _reference_description_sections(reference_detail.get("description", "")):
+            with st.container(border=True):
+                st.markdown(f"**{label}**")
+                st.write(value)
+
+        st.markdown("### 🧪 Steps reales de Azure")
+        steps_df = pd.DataFrame(reference_detail.get("steps") or [])
+        if not steps_df.empty:
+            display_cols = [c for c in ["Step #", "Action", "Expected value"] if c in steps_df.columns]
+            st.dataframe(steps_df[display_cols], width="stretch", hide_index=True)
+        else:
+            st.warning("⚠️ El Test Case de referencia no tiene Steps legibles.")
+
+        checks = _reference_compare(reference_detail)
+        comparison_rows = [
+            {"Elemento": label, "Cumple": "✅" if ok else "⚠️"}
+            for label, ok in checks.items()
+        ]
+        st.markdown("### 🔎 Comparación contra nuestra estructura aprobada")
+        st.dataframe(pd.DataFrame(comparison_rows), width="stretch", hide_index=True)
+
+        if all(checks.values()):
+            st.success(
+                "✅ La referencia contiene la estructura aprobada. "
+                "Ahora el agente puede preparar un CP nuevo en PREVIEW, sin enviarlo a Azure."
+            )
+        else:
+            st.warning(
+                "⚠️ La referencia no contiene todos los elementos esperados. "
+                "Se conserva como referencia, pero no se inventan los elementos faltantes."
+            )
+
+        if result and all(checks.values()):
+            st.markdown("### 4️⃣ Preparar nuevo Test Case — PREVIEW")
+            st.caption(
+                "El agente toma la estructura del Test Case de referencia y la aplica "
+                "al CP generado. En esta etapa NO se crea ni modifica ningún recurso en Azure."
+            )
+            if st.button(
+                "🧩 Preparar CP nuevo con la estructura de referencia",
+                key="azure_prepare_new_cp_preview",
+            ):
+                try:
+                    generated_cases = result.get("TEST_CASES", []) or []
+                    if not generated_cases:
+                        raise ValueError("No hay Test Cases generados para preparar el preview.")
+                    st.session_state.azure_reference_preview = _build_reference_preview_case(
+                        reference_detail,
+                        generated_cases[0],
+                    )
+                except Exception as exc:
+                    st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
+
+        preview = st.session_state.get("azure_reference_preview")
+        if preview:
+            st.markdown("### 👀 CP nuevo antes de enviarlo a Azure")
+            st.info(
+                "PUNTO DE CONTROL: este CP es únicamente una vista previa. "
+                "No se ha realizado ningún POST/creación en Azure DevOps."
+            )
+            st.markdown(f"**Title:** {safe_text(preview.get('Title'))}")
+
+            st.markdown("#### Description")
+            for label, value in _reference_description_sections(preview.get("Description", "")):
+                with st.container(border=True):
+                    st.markdown(f"**{label}**")
+                    st.write(value)
+
+            st.markdown("#### Steps")
+            preview_steps = pd.DataFrame(preview.get("Steps") or [])
+            if not preview_steps.empty:
+                cols = [c for c in ["Step #", "Action", "Expected value"] if c in preview_steps.columns]
+                st.dataframe(preview_steps[cols], width="stretch", hide_index=True)
+            else:
+                st.warning("⚠️ El CP nuevo no tiene Steps para revisar.")
+
+            st.warning(
+                "🛑 FIN DE ESTA FASE: el CP queda listo para revisión funcional. "
+                "Todavía no existe ninguna acción de creación, actualización o eliminación en Azure."
+            )
 
 
 
@@ -2081,5 +2490,5 @@ if result:
 
     st.dataframe(
         pd.DataFrame(preview_rows),
-        use_container_width=True,
+        width="stretch",
     )
