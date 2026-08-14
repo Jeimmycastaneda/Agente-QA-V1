@@ -2516,6 +2516,64 @@ if result:
     render_cu_coverage(current_coverage)
 
     # ========================================================
+    # PREVIEW DEL CP NUEVO — ACCESO DIRECTO DESPUÉS DE GENERAR
+    # ========================================================
+    # Antes el botón solo se dibujaba dentro de la sección de referencia,
+    # que queda arriba de la pantalla. Después de generar la HU el usuario
+    # recibía el mensaje correcto, pero no tenía un botón visible en ese
+    # mismo punto para continuar. Se conserva el mismo flujo GET/preview:
+    # NO se crea, modifica ni elimina ningún recurso en Azure.
+    reference_detail_after_generation = st.session_state.get(
+        "azure_reference_detail"
+    )
+
+    if reference_detail_after_generation:
+        st.divider()
+        st.markdown("### 🧩 Siguiente paso — Preparar CP nuevo para revisión funcional")
+        st.caption(
+            "Usa la HU como fuente funcional y el Test Case real seleccionado "
+            "como referencia estructural. Este paso genera únicamente una "
+            "vista previa; todavía no se envía ningún CP a Azure."
+        )
+
+        if st.button(
+            "🧩 Generar CP nuevo para revisión funcional",
+            key="azure_prepare_new_cp_preview_results",
+            type="primary",
+        ):
+            try:
+                generated_cases = result.get("TEST_CASES", []) or []
+                if not generated_cases:
+                    raise ValueError(
+                        "No hay Test Cases generados a partir de la HU."
+                    )
+
+                previews = []
+                for generated_case in generated_cases:
+                    previews.append(
+                        _build_reference_preview_case(
+                            reference_detail_after_generation,
+                            generated_case,
+                        )
+                    )
+
+                st.session_state.azure_reference_preview = previews
+                st.success(
+                    f"✅ Preview preparado: {len(previews)} CP(s). "
+                    "Revisa el resultado antes de cualquier envío a Azure."
+                )
+                st.rerun()
+
+            except Exception as exc:
+                st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
+    else:
+        st.info(
+            "ℹ️ Primero selecciona y compara un Test Case de referencia de Azure. "
+            "Cuando la comparación esté realizada y la HU haya generado los CP, "
+            "aquí aparecerá el botón para preparar el CP nuevo."
+        )
+
+    # ========================================================
     # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
     # V13: un CU por Test Case + eliminar CP
     # ========================================================
