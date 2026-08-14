@@ -161,146 +161,83 @@ def list_test_plans():
 
 
 
-def _project_testplan_url(config, path):
-    org = quote(config["org"], safe="")
-    project = quote(config["project"], safe="")
-    return f"https://dev.azure.com/{org}/{project}/_apis/testplan/{path}"
-
-
-def list_test_plans(limit=10):
-    """Read-only: returns only the 10 most recent plans from the first API response."""
+def list_test_suites(plan_id):
+    """List suites for one Test Plan. READ ONLY (GET only)."""
     config = get_azure_config()
     _validate_config(config)
-    url = _project_testplan_url(config, "plans") + "?api-version=7.1"
-    payload, _ = _get_json(url, config["pat"])
-    plans = payload.get("value") or []
-    plans = sorted(plans, key=lambda x: int(x.get("id") or 0), reverse=True)[:int(limit)]
-    return {"ok": True, "organization": config["org"], "project": config["project"], "count": len(plans), "plans": [
-        {"id": p.get("id"), "name": p.get("name", ""), "state": p.get("state", ""),
-         "area_path": p.get("areaPath", ""), "iteration": p.get("iteration", ""),
-         "start_date": p.get("startDate", ""), "end_date": p.get("endDate", "")}
-        for p in plans
-    ], "message": "Consulta de Test Plans correcta. Solo se realizó una consulta GET; no se modificó Azure."}
-
-
-def get_test_plan(plan_id):
-    """Read-only detail for one selected Test Plan."""
-    config = get_azure_config(); _validate_config(config)
-    url = _project_testplan_url(config, f"plans/{quote(str(plan_id), safe='')}") + "?api-version=7.1"
-    payload, _ = _get_json(url, config["pat"])
-    return payload
-
-
-def list_test_suites(plan_id):
-    """Read-only: list suites belonging to one selected Test Plan."""
-    config = get_azure_config(); _validate_config(config)
-    url = _project_testplan_url(config, f"Plans/{quote(str(plan_id), safe='')}/suites") + "?api-version=7.1"
-    payload, _ = _get_json(url, config["pat"])
-    suites = payload.get("value") or []
-    return [{"id": s.get("id"), "name": s.get("name", ""), "suite_type": s.get("suiteType", ""),
-             "plan_id": s.get("plan", {}).get("id") if isinstance(s.get("plan"), dict) else plan_id,
-             "parent_suite": s.get("parentSuite", {}).get("id") if isinstance(s.get("parentSuite"), dict) else None}
-            for s in suites]
-
-
-def list_test_cases(plan_id, suite_id):
-    """Read-only: list Test Cases in one selected Suite.
-
-    Uses the Azure DevOps Test service endpoint because some projects return
-    404 for the equivalent Test Plan controller endpoint even though the
-    selected Test Plan and Suite are valid. This function is GET-only.
-    """
-    config = get_azure_config(); _validate_config(config)
     org = quote(config["org"], safe="")
     project = quote(config["project"], safe="")
-    plan = quote(str(plan_id), safe="")
-    suite = quote(str(suite_id), safe="")
-
-    # Official Azure DevOps Test API: list all test cases in a suite.
-    # GET only; no create/update/delete operation is performed.
     url = (
-        f"https://dev.azure.com/{org}/{project}"
-        f"/_apis/test/Plans/{plan}/suites/{suite}/testcases?api-version=7.1"
+        f"https://dev.azure.com/{org}/{project}/_apis/testplan/Plans/"
+        f"{quote(str(plan_id), safe='')}/suites?api-version=7.1"
     )
     payload, _ = _get_json(url, config["pat"])
-
-    rows = []
-    for item in payload.get("value") or []:
-        tc = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
-        test_id = tc.get("id") or item.get("id")
-        if not test_id:
-            continue
-
-        # The suite-list response normally contains only the Test Case id/url.
-        # Read the title with a separate GET so the UI can offer a meaningful
-        # reference selector.
-        title = tc.get("name") or tc.get("title") or ""
-        if not title:
-            try:
-                detail = get_test_case_detail(test_id)
-                title = detail.get("title", "")
-            except Exception:
-                title = ""
-
-        rows.append({"id": test_id, "title": title, "raw": item})
-
-    return rows
-
-def _parse_steps_xml(xml_text):
-    import html as _html
-    import re as _re
-    if not xml_text:
-        return []
-    text = _html.unescape(str(xml_text))
-    steps = []
-    for match in _re.finditer(r'<step\b[^>]*>.*?</step>', text, flags=_re.I | _re.S):
-        node = match.group(0)
-        vals = _re.findall(r'<parameterizedString[^>]*>(.*?)</parameterizedString>', node, flags=_re.I | _re.S)
-        clean = []
-        for value in vals[:2]:
-            value = _re.sub(r'<[^>]+>', '', value)
-            clean.append(_html.unescape(value).strip())
-        if clean:
-            steps.append({"Step #": len(steps)+1, "Action": clean[0] if len(clean)>0 else "", "Expected value": clean[1] if len(clean)>1 else ""})
-    return steps
-
-
-def get_test_case_detail(test_case_id):
-    """Read-only detail of one existing Test Case for structure comparison."""
-    config = get_azure_config(); _validate_config(config)
-    org = quote(config["org"], safe=""); project = quote(config["project"], safe="")
-    url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/{quote(str(test_case_id), safe='')}?api-version=7.1"
-    payload, _ = _get_json(url, config["pat"])
-    fields = payload.get("fields") or {}
-    description = fields.get("System.Description", "") or ""
-    steps_xml = fields.get("Microsoft.VSTS.TCM.Steps", "") or ""
-    steps = _parse_steps_xml(steps_xml)
+    suites = payload.get("value") or []
     return {
-        "id": payload.get("id"),
-        "title": fields.get("System.Title", ""),
-        "description": description,
-        "steps": steps,
-        "area_path": fields.get("System.AreaPath", ""),
-        "iteration_path": fields.get("System.IterationPath", ""),
-        "state": fields.get("System.State", ""),
-        "work_item_type": fields.get("System.WorkItemType", "Test Case"),
-        "raw_fields": fields,
+        "ok": True,
+        "count": len(suites),
+        "suites": [
+            {
+                "id": x.get("id"),
+                "name": x.get("name", ""),
+                "state": x.get("state", ""),
+                "area_path": x.get("areaPath", ""),
+                "plan_id": plan_id,
+            }
+            for x in suites
+        ],
+        "message": "Consulta de Suites correcta. Solo se realizó una consulta GET.",
     }
 
 
-def compare_test_case_structure(detail):
-    """No network. Compares the selected Azure case with our approved structure."""
-    description = str(detail.get("description") or "")
-    labels = ["Producto:", "Módulo:", "Descripción:", "Resultado esperado de la prueba:", "Precondiciones:", "Caso de uso relacionado:"]
-    present = {label: label.lower() in description.lower() for label in labels}
+def list_test_cases(plan_id, suite_id):
+    """List Test Cases in a suite. READ ONLY (GET only)."""
+    config = get_azure_config()
+    _validate_config(config)
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/testplan/Plans/"
+        f"{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/"
+        f"TestCase?api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    cases = payload.get("value") or []
     return {
-        "description_has_product": present["Producto:"],
-        "description_has_module": present["Módulo:"],
-        "description_has_description": present["Descripción:"],
-        "description_has_expected": present["Resultado esperado de la prueba:"],
-        "description_has_preconditions": present["Precondiciones:"],
-        "description_has_related_use_case": present["Caso de uso relacionado:"],
-        "steps_count": len(detail.get("steps") or []),
-        "steps_have_action_expected": all(bool(str(s.get("Action", "")).strip()) and bool(str(s.get("Expected value", "")).strip()) for s in (detail.get("steps") or [])),
-        "reference_model": "Description: Producto + Módulo + Descripción + Resultado esperado de la prueba + Precondiciones + Caso de uso relacionado; Steps: Steps + Action + Expected."
+        "ok": True,
+        "count": len(cases),
+        "test_cases": [
+            {
+                "id": item.get("workItem", {}).get("id") or item.get("id"),
+                "name": item.get("workItem", {}).get("name") or item.get("name", ""),
+                "url": item.get("workItem", {}).get("url") or item.get("url", ""),
+            }
+            for item in cases
+        ],
+        "message": "Consulta de Test Cases correcta. Solo se realizó una consulta GET.",
+    }
+
+
+def get_test_case_detail(work_item_id):
+    """Read one Test Case Work Item, including Description and Steps. GET only."""
+    config = get_azure_config()
+    _validate_config(config)
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
+        f"{quote(str(work_item_id), safe='')}?%24expand=all&api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    fields = payload.get("fields", {}) or {}
+    return {
+        "ok": True,
+        "id": payload.get("id", work_item_id),
+        "title": fields.get("System.Title", ""),
+        "state": fields.get("System.State", ""),
+        "area_path": fields.get("System.AreaPath", ""),
+        "description_html": fields.get("System.Description", "") or "",
+        "steps_html": fields.get("Microsoft.VSTS.TCM.Steps", "") or "",
+        "fields": fields,
+        "message": "Consulta del Test Case correcta. Solo se realizó una consulta GET.",
     }
