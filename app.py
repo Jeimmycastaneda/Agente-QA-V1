@@ -11,7 +11,14 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
-from azure_devops import AzureDevOpsError, get_test_plan, list_test_plans, test_connection
+from azure_devops import (
+    AzureDevOpsError,
+    get_test_plan,
+    list_test_cases,
+    list_test_plans,
+    list_test_suites,
+    test_connection,
+)
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1604,6 +1611,14 @@ if "azure_selected_test_plan_id" not in st.session_state:
     st.session_state.azure_selected_test_plan_id = None
 if "azure_selected_test_plan_detail" not in st.session_state:
     st.session_state.azure_selected_test_plan_detail = None
+if "azure_test_suites" not in st.session_state:
+    st.session_state.azure_test_suites = []
+if "azure_selected_test_suite_id" not in st.session_state:
+    st.session_state.azure_selected_test_suite_id = None
+if "azure_test_cases" not in st.session_state:
+    st.session_state.azure_test_cases = []
+if "azure_case_proposal" not in st.session_state:
+    st.session_state.azure_case_proposal = None
 
 st.title(f"🤖 Agente QA {APP_VERSION} — Generador de Casos de Prueba")
 st.caption(
@@ -1686,6 +1701,10 @@ with st.sidebar:
                 plans_result = list_test_plans()
             st.session_state.azure_test_plans = plans_result.get("plans", [])
             st.session_state.azure_selected_test_plan_detail = None
+            st.session_state.azure_test_suites = []
+            st.session_state.azure_selected_test_suite_id = None
+            st.session_state.azure_test_cases = []
+            st.session_state.azure_case_proposal = None
             st.success(
                 f"✅ Consulta correcta: {plans_result['count']} Test Plan(s) mostrados."
             )
@@ -1735,6 +1754,190 @@ with st.sidebar:
                 "sobre el Test Plan seleccionado; no se creó, modificó ni eliminó "
                 "ningún recurso."
             )
+
+        st.markdown("### 🗂️ Suites del Test Plan")
+        st.caption(
+            "Consulta de solo lectura. Se consulta únicamente la Suite del Test Plan seleccionado. "
+            "No crea, edita ni elimina Suites, Test Cases ni Work Items."
+        )
+        if st.button(
+            "🗂️ Consultar Suites del Test Plan seleccionado",
+            key="azure_list_test_suites",
+        ):
+            try:
+                selected_plan_id = st.session_state.azure_selected_test_plan_id
+                with st.spinner("Consultando Suites del Test Plan seleccionado..."):
+                    suites_result = list_test_suites(selected_plan_id)
+                st.session_state.azure_test_suites = suites_result.get("suites", [])
+                st.session_state.azure_selected_test_suite_id = None
+                st.session_state.azure_test_cases = []
+                st.success(
+                    f"✅ Consulta correcta: {suites_result['count']} Suite(s) mostradas."
+                )
+            except AzureDevOpsError as exc:
+                st.error(f"❌ No se pudieron consultar las Suites: {exc}")
+            except Exception as exc:
+                st.error(f"❌ Error inesperado al consultar Suites: {exc}")
+
+        suites = st.session_state.azure_test_suites
+        if suites:
+            suites_df = pd.DataFrame(suites)
+            st.dataframe(suites_df, width="stretch", hide_index=True)
+
+            suite_options = {
+                f"{suite.get('id')} — {suite.get('name', '')}": suite.get('id')
+                for suite in suites
+            }
+            selected_suite_label = st.selectbox(
+                "📌 Selecciona una Suite para consultar sus Test Cases",
+                list(suite_options.keys()),
+                key="azure_selected_test_suite",
+            )
+            st.session_state.azure_selected_test_suite_id = suite_options[selected_suite_label]
+
+            if st.button(
+                "🔎 Consultar Test Cases de la Suite seleccionada",
+                key="azure_list_test_cases",
+            ):
+                try:
+                    selected_plan_id = st.session_state.azure_selected_test_plan_id
+                    selected_suite_id = st.session_state.azure_selected_test_suite_id
+                    with st.spinner("Consultando Test Cases de la Suite seleccionada..."):
+                        cases_result = list_test_cases(selected_plan_id, selected_suite_id)
+                    st.session_state.azure_test_cases = cases_result.get("test_cases", [])
+                    st.session_state.azure_case_proposal = None
+                    st.success(
+                        f"✅ Consulta correcta: {cases_result['count']} Test Case(s) mostrados."
+                    )
+                except AzureDevOpsError as exc:
+                    st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
+                except Exception as exc:
+                    st.error(f"❌ Error inesperado al consultar Test Cases: {exc}")
+
+            test_cases = st.session_state.azure_test_cases
+            if test_cases:
+                st.dataframe(pd.DataFrame(test_cases), width="stretch", hide_index=True)
+                st.info(
+                    "Consulta de Test Cases correcta. Solo se realizó una consulta GET sobre "
+                    "la Suite seleccionada; no se creó, modificó ni eliminó ningún recurso."
+                )
+            elif st.session_state.azure_selected_test_suite_id:
+                st.warning(
+                    "⚠️ La Suite seleccionada no tiene Test Cases registrados en Azure DevOps. "
+                    "Esto no es un error: podemos preparar una propuesta sin escribir todavía en Azure."
+                )
+
+                generated_cases = (st.session_state.get("result_json") or {}).get("TEST_CASES", [])
+                if generated_cases:
+                    st.markdown("### 🧪 Propuesta de Test Case")
+                    st.caption(
+                        "Esta etapa usa los casos generados por el Agente QA para preparar una propuesta "
+                        "para la Suite seleccionada. No crea ni modifica ningún recurso en Azure DevOps."
+                    )
+
+                    proposal_options = {}
+                    for idx, tc in enumerate(generated_cases):
+                        case_id = safe_text(tc.get("ID"), f"CASO-{idx + 1:05d}")
+                        title = build_case_title(tc, case_id)
+                        proposal_options[f"{case_id} — {title[:100]}"] = idx
+
+                    selected_proposal_label = st.selectbox(
+                        "Selecciona el CP generado que quieres proponer para esta Suite",
+                        list(proposal_options.keys()),
+                        key="azure_proposal_case",
+                    )
+
+                    if st.button(
+                        "🧪 Preparar propuesta (sin crear en Azure)",
+                        key="azure_prepare_case_proposal",
+                    ):
+                        proposal_index = proposal_options[selected_proposal_label]
+                        tc = generated_cases[proposal_index]
+                        case_id = safe_text(tc.get("ID"), f"CASO-{proposal_index + 1:05d}")
+                        module = safe_text(tc.get("Module"), "GENERAL")
+                        raw_description = safe_text(
+                            tc.get("Description"),
+                            safe_text(tc.get("Scenario")),
+                        )
+                        expected = safe_text(
+                            tc.get("Expected Result"),
+                            tc.get("ExpectedResult"),
+                        )
+                        preconditions = safe_text(tc.get("Preconditions"))
+                        related_use_case = safe_text(tc.get("Related Use Case"))
+                        product = safe_text(
+                            tc.get("Product"),
+                            (st.session_state.get("result_json") or {}).get("PRODUCT"),
+                        )
+                        title_base = build_case_title(tc, case_id)
+                        title = title_base if title_base.startswith(case_id) else f"{case_id} - {title_base}"
+                        description = format_description_for_azure(
+                            build_azure_description(
+                                product=product,
+                                module=module,
+                                description=raw_description,
+                                expected=expected,
+                                preconditions=preconditions,
+                                related_use_case=related_use_case,
+                            )
+                        )
+                        steps = tc.get("Steps") or []
+                        if not steps:
+                            steps = [{
+                                "Step #": 1,
+                                "Action": "Información insuficiente para definir el paso.",
+                                "Expected value": "Validar con el equipo funcional antes de ejecutar.",
+                            }]
+                        st.session_state.azure_case_proposal = {
+                            "id": case_id,
+                            "title": title,
+                            "description": description,
+                            "preconditions": preconditions or "Pendiente / no definido en la fuente.",
+                            "related_use_case": related_use_case or "Pendiente / no definido en la fuente.",
+                            "steps": steps,
+                            "plan_id": st.session_state.azure_selected_test_plan_id,
+                            "suite_id": st.session_state.azure_selected_test_suite_id,
+                            "suite_name": next(
+                                (x.get("name", "") for x in suites if x.get("id") == st.session_state.azure_selected_test_suite_id),
+                                "",
+                            ),
+                        }
+                        st.success(
+                            "✅ Propuesta preparada. No se creó ni modificó ningún recurso en Azure DevOps."
+                        )
+
+                proposal = st.session_state.get("azure_case_proposal")
+                if proposal:
+                    st.markdown("### 👁️ Vista previa antes de cualquier escritura")
+                    st.info(
+                        f"Destino propuesto: Test Plan {proposal['plan_id']} / "
+                        f"Suite {proposal['suite_id']} — {proposal['suite_name']}"
+                    )
+                    st.text_input("ID funcional", proposal["id"], disabled=True)
+                    st.text_input("Title", proposal["title"], disabled=True)
+                    st.text_area("Description", proposal["description"], height=260, disabled=True)
+                    st.text_area("Preconditions", proposal["preconditions"], height=120, disabled=True)
+                    st.text_input("Caso de uso relacionado", proposal["related_use_case"], disabled=True)
+
+                    steps_df = pd.DataFrame([
+                        {
+                            "Steps": step.get("Step #", i + 1),
+                            "Action": safe_text(step.get("Action"), "Acción no definida"),
+                            "Expected": safe_text(
+                                step.get("Expected value"),
+                                "Resultado esperado no definido",
+                            ),
+                        }
+                        for i, step in enumerate(proposal["steps"])
+                    ])
+                    st.dataframe(steps_df, width="stretch", hide_index=True)
+                    st.warning(
+                        "🔒 MODO SEGURO: esta versión solo prepara la propuesta. "
+                        "Todavía NO existe ningún botón que cree este Test Case en Azure DevOps."
+                    )
+        elif st.session_state.get("azure_selected_test_plan_id"):
+            st.caption("Aún no se han consultado las Suites del Test Plan seleccionado.")
+
     elif not st.session_state.get("azure_test_plans"):
         st.caption("Aún no se han consultado Test Plans.")
 

@@ -156,6 +156,123 @@ def get_test_plan(plan_id):
     }
 
 
+
+def list_test_suites(plan_id, limit=50):
+    """Return suites for ONE selected Test Plan using a single GET request.
+
+    SAFETY CONTRACT: read-only. This function only calls the Test Plan suites
+    list endpoint, does not follow continuation pages, and never creates,
+    updates, deletes, or otherwise modifies Azure DevOps resources.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+    try:
+        plan_id = int(plan_id)
+    except (TypeError, ValueError):
+        raise AzureDevOpsError("El ID del Test Plan no es válido.")
+    if plan_id <= 0:
+        raise AzureDevOpsError("El ID del Test Plan debe ser mayor que cero.")
+
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 50
+
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/testplan/Plans/"
+        f"{plan_id}/suites?asTreeView=false&api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    raw_suites = payload.get("value") or []
+
+    suites = []
+    for suite in raw_suites[:limit]:
+        suites.append({
+            "id": suite.get("id"),
+            "name": suite.get("name", ""),
+            "suite_type": suite.get("suiteType", ""),
+            "parent_suite_id": (suite.get("parentSuite") or {}).get("id"),
+            "parent_suite_name": (suite.get("parentSuite") or {}).get("name", ""),
+            "plan_id": (suite.get("plan") or {}).get("id", plan_id),
+        })
+
+    return {
+        "ok": True,
+        "organization": config["org"],
+        "project": config["project"],
+        "plan_id": plan_id,
+        "count": len(suites),
+        "suites": suites,
+        "message": (
+            f"Consulta de Suites correcta. Se consultó únicamente la primera "
+            f"respuesta de Azure para el Test Plan {plan_id}; se muestran "
+            f"hasta {limit} Suites. Solo se realizó una consulta GET; no se "
+            "creó, modificó ni eliminó ningún recurso."
+        ),
+    }
+
+
+def list_test_cases(plan_id, suite_id, limit=50):
+    """Return Test Cases from ONE selected Suite using a single GET request.
+
+    SAFETY CONTRACT: read-only. No work item GET is performed and no write
+    operation is possible here. Only the Test Plan suite TestCase endpoint is
+    queried, and continuation pages are deliberately not followed.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+    try:
+        plan_id = int(plan_id)
+        suite_id = int(suite_id)
+    except (TypeError, ValueError):
+        raise AzureDevOpsError("El ID del Test Plan o de la Suite no es válido.")
+    if plan_id <= 0 or suite_id <= 0:
+        raise AzureDevOpsError("Los IDs del Test Plan y de la Suite deben ser mayores que cero.")
+
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 50
+
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/testplan/Plans/"
+        f"{plan_id}/Suites/{suite_id}/TestCase?expand=false&excludeFlags=3&"
+        f"api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    raw_cases = payload.get("value") or []
+
+    cases = []
+    for item in raw_cases[:limit]:
+        work_item = item.get("workItem") or {}
+        cases.append({
+            "id": work_item.get("id"),
+            "name": work_item.get("name", ""),
+            "order": item.get("order"),
+            "suite_id": (item.get("testSuite") or {}).get("id", suite_id),
+            "suite_name": (item.get("testSuite") or {}).get("name", ""),
+        })
+
+    return {
+        "ok": True,
+        "organization": config["org"],
+        "project": config["project"],
+        "plan_id": plan_id,
+        "suite_id": suite_id,
+        "count": len(cases),
+        "test_cases": cases,
+        "message": (
+            f"Consulta de Test Cases correcta. Se consultó únicamente la "
+            f"Suite {suite_id} del Test Plan {plan_id}; se muestran hasta "
+            f"{limit} Test Cases de la primera respuesta. Solo se realizó "
+            "una consulta GET; no se creó, modificó ni eliminó ningún recurso."
+        ),
+    }
+
 def list_test_plans(limit=10):
     """Return only the 10 most recent Test Plans visible to the project.
 
