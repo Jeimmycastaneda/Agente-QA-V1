@@ -11,6 +11,8 @@ import json
 import os
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
+from html import unescape
+import re
 from urllib.request import Request, urlopen
 
 
@@ -270,6 +272,74 @@ def list_test_cases(plan_id, suite_id, limit=50):
             f"Suite {suite_id} del Test Plan {plan_id}; se muestran hasta "
             f"{limit} Test Cases de la primera respuesta. Solo se realizó "
             "una consulta GET; no se creó, modificó ni eliminó ningún recurso."
+        ),
+    }
+
+
+def get_test_case_detail(test_case_id):
+    """Return the Azure Test Case work item detail using one GET request.
+
+    SAFETY CONTRACT: read-only reference step. This function is used only to
+    inspect an existing Test Case before any future creation workflow is
+    enabled. It never creates, updates, or deletes Azure DevOps resources.
+    """
+    config = get_azure_config()
+    _validate_config(config)
+    try:
+        test_case_id = int(test_case_id)
+    except (TypeError, ValueError):
+        raise AzureDevOpsError("El ID del Test Case no es válido.")
+    if test_case_id <= 0:
+        raise AzureDevOpsError("El ID del Test Case debe ser mayor que cero.")
+
+    org = quote(config["org"], safe="")
+    project = quote(config["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
+        f"{test_case_id}?$expand=all&api-version=7.1"
+    )
+    payload, _ = _get_json(url, config["pat"])
+    fields = payload.get("fields") or {}
+
+    description = fields.get("System.Description", "") or ""
+    preconditions = fields.get("Microsoft.VSTS.TCM.Preconditions", "") or ""
+    steps = fields.get("Microsoft.VSTS.TCM.Steps", "") or ""
+
+    def plain_text(value):
+        value = unescape(str(value or ""))
+        value = re.sub(r"<br\s*/?>", "\n", value, flags=re.I)
+        value = re.sub(r"</(div|p|li|tr)>", "\n", value, flags=re.I)
+        value = re.sub(r"</td>", "\t", value, flags=re.I)
+        value = re.sub(r"<[^>]+>", "", value)
+        value = re.sub(r"[ \t]+", " ", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        return value.strip()
+
+    return {
+        "ok": True,
+        "organization": config["org"],
+        "project": config["project"],
+        "test_case": {
+            "id": payload.get("id", test_case_id),
+            "title": fields.get("System.Title", ""),
+            "state": fields.get("System.State", ""),
+            "area_path": fields.get("System.AreaPath", ""),
+            "iteration_path": fields.get("System.IterationPath", ""),
+            "description_html": description,
+            "description_text": plain_text(description),
+            "preconditions_html": preconditions,
+            "preconditions_text": plain_text(preconditions),
+            "steps_html": steps,
+            "steps_text": plain_text(steps),
+            "priority": fields.get("Microsoft.VSTS.Common.Priority", ""),
+            "assigned_to": (fields.get("System.AssignedTo") or {}).get("displayName", "")
+                if isinstance(fields.get("System.AssignedTo"), dict)
+                else str(fields.get("System.AssignedTo", "") or ""),
+        },
+        "message": (
+            "Consulta del Test Case correcta. Solo se realizó una consulta GET "
+            "al Work Item seleccionado para compararlo como referencia; no se "
+            "creó, modificó ni eliminó ningún recurso."
         ),
     }
 
