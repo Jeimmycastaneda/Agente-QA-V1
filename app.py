@@ -162,8 +162,32 @@ def _azure_description_html(description):
     return f"<div>{escaped}</div>"
 
 
+def _get_id_padre(tc):
+    """Obtiene el ID padre explícito. Nunca usa el Test Plan como sustituto."""
+    for key in ("IDPadre", "ID Padre", "Parent ID", "ParentId", "parent_id", "id_padre"):
+        value = safe_text(tc.get(key))
+        if value:
+            return value
+    return safe_text(st.session_state.get("azure_id_padre"))
+
+
+def _tipo_origen_proyecto(tc):
+    """Valor requerido por el campo Custom.TipoOrigenProyecto."""
+    return safe_text(
+        tc.get("Tipo Origen Proyecto"),
+        tc.get("TipoOrigenProyecto"),
+        st.session_state.get("azure_tipo_origen_proyecto"),
+        "Proyecto",
+    )
+
+
 def create_azure_test_case_work_item(tc, target_plan):
-    """Crea un Work Item de tipo Test Case. Solo se llama al confirmar."""
+    """Crea un Work Item de tipo Test Case. Solo se llama al confirmar.
+
+    V43: el proyecto corporativo exige Custom.IDPadre y Custom.TipoOrigenProyecto.
+    IDPadre debe venir de la HU/CP o ser informado explícitamente por la usuaria;
+    nunca se inventa ni se reemplaza por el ID del Test Plan o de la Suite.
+    """
     cfg = _az_config()
     _az_validate(cfg)
     case_id = safe_text(tc.get("ID"), "CP-PREVIEW")
@@ -178,10 +202,30 @@ def create_azure_test_case_work_item(tc, target_plan):
             safe_text(tc.get("Preconditions"), "Pendiente"),
             safe_text(tc.get("Related Use Case"), "Pendiente"),
         )
+
+    id_padre = _get_id_padre(tc)
+    tipo_origen = _tipo_origen_proyecto(tc)
+    if not id_padre:
+        raise AzureDevOpsError(
+            "No se puede crear el CP: Azure exige el campo Custom.IDPadre. "
+            "Informa el ID del Work Item padre (HU/elemento funcional) antes de confirmar. "
+            "No se usará automáticamente el Test Plan ni la Suite como IDPadre."
+        )
+    if not tipo_origen:
+        raise AzureDevOpsError(
+            "No se puede crear el CP: Azure exige Custom.TipoOrigenProyecto. "
+            "El valor esperado para esta configuración es 'Proyecto'."
+        )
+
+    # Si el campo es numérico en Azure, enviar entero cuando el valor es solo numérico;
+    # de lo contrario conservar texto para que Azure devuelva una validación explícita.
+    id_padre_value = int(id_padre) if id_padre.isdigit() else id_padre
     patch = [
         {"op": "add", "path": "/fields/System.Title", "value": title},
         {"op": "add", "path": "/fields/System.Description", "value": _azure_description_html(description)},
         {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": _azure_steps_xml(safe_steps(tc))},
+        {"op": "add", "path": "/fields/Custom.IDPadre", "value": id_padre_value},
+        {"op": "add", "path": "/fields/Custom.TipoOrigenProyecto", "value": tipo_origen},
     ]
     area_path = safe_text(target_plan.get("area_path"))
     iteration = safe_text(target_plan.get("iteration"))
@@ -682,7 +726,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V42-REVISION-CP-Y-CARGA-CONTROLADA-AZURE"
+APP_VERSION = "V43-CAMPOS-REQUERIDOS-AZURE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -2331,6 +2375,67 @@ with st.sidebar:
             except Exception as exc:
                 st.error(f"❌ Error inesperado al consultar Suites: {exc}")
 
+    # ========================================================
+    # ELIMINAR CP — UBICADO DEBAJO DE LOS 10 TEST PLANS MÁS RECIENTES
+    # ========================================================
+    # La eliminación sigue siendo SOLO sobre la generación actual en memoria.
+    # No elimina Test Cases de Azure DevOps.
+    delete_result = st.session_state.get("result_json")
+    if delete_result and delete_result.get("TEST_CASES"):
+        st.markdown("### 🗑️ Eliminar caso de prueba")
+        st.caption(
+            "Ubicado debajo de los 10 Test Plans más recientes. Esta acción elimina el CP "
+            "solo de la generación actual y de COVERAGE; no elimina ningún recurso de Azure DevOps."
+        )
+        delete_cases = delete_result.get("TEST_CASES", []) or []
+        delete_options = []
+        for idx, tc in enumerate(delete_cases):
+            delete_id = safe_text(tc.get("ID"), f"CASO-{idx + 1:05d}")
+            delete_title = build_case_title(tc, delete_id)
+            delete_options.append(f"{delete_id} — {delete_title[:100]}")
+
+        delete_label = st.selectbox(
+            "Selecciona el CP que deseas eliminar",
+            delete_options,
+            key="v44_delete_case_select",
+        )
+        delete_index = delete_options.index(delete_label)
+        delete_case_id = safe_text(
+            delete_cases[delete_index].get("ID"),
+            f"CASO-{delete_index + 1:05d}",
+        )
+        confirm_delete = st.checkbox(
+            f"Confirmo que quiero eliminar {delete_case_id}",
+            key=f"v44_confirm_delete_{delete_index}",
+        )
+        if st.button(
+            "🗑️ Eliminar CP seleccionado",
+            type="secondary",
+            disabled=not confirm_delete,
+            key="v44_delete_cp",
+        ):
+            candidate_cases = [
+                tc for i, tc in enumerate(delete_cases)
+                if i != delete_index
+            ]
+            deletion_coverage = calculate_cu_coverage(
+                candidate_cases,
+                delete_result.get("USE_CASES", [])
+            )
+            if not deletion_coverage["valid"]:
+                st.error(
+                    "🚫 No se puede eliminar este CP porque dejaría al menos un CU sin cobertura."
+                )
+            elif delete_test_case(delete_result, delete_index):
+                st.session_state.excel_data = create_excel(delete_result, selected_config)
+                st.session_state.pdf_data = create_pdf(
+                    delete_result,
+                    selected_config,
+                    st.session_state.get("source_name", ""),
+                )
+                st.success(f"✅ {delete_case_id} eliminado.")
+                st.rerun()
+
     suites = st.session_state.get("azure_reference_suites", [])
     if suites:
         suite_options = [
@@ -2709,49 +2814,6 @@ if result:
             except Exception as exc:
                 st.error(f"❌ No se pudo guardar el cambio: {exc}")
 
-        st.divider()
-        st.markdown("### 🗑️ Eliminar caso de prueba")
-
-        st.warning(
-            "Esta acción elimina el Test Case seleccionado de la generación actual "
-            "y también elimina su relación en COVERAGE. No elimina otros casos."
-        )
-
-        confirm_delete = st.checkbox(
-            f"Confirmo que quiero eliminar {selected_case_id}",
-            key=f"v13_confirm_delete_{selected_index}",
-        )
-
-        if st.button(
-            "🗑️ Eliminar CP seleccionado",
-            type="secondary",
-            disabled=not confirm_delete,
-            key=f"v13_delete_cp_{selected_index}",
-        ):
-            deleted_id = selected_case_id
-            # Simular eliminación antes de aplicarla para preservar 1 CP mínimo por CU.
-            candidate_cases = [
-                tc for i, tc in enumerate(result.get("TEST_CASES", []))
-                if i != selected_index
-            ]
-            deletion_coverage = calculate_cu_coverage(
-                candidate_cases,
-                result.get("USE_CASES", [])
-            )
-
-            if not deletion_coverage["valid"]:
-                st.error(
-                    "🚫 No se puede eliminar este CP porque dejaría al menos un CU sin cobertura."
-                )
-            elif delete_test_case(result, selected_index):
-                st.session_state.excel_data = create_excel(result, selected_config)
-                st.session_state.pdf_data = create_pdf(
-                    result,
-                    selected_config,
-                    st.session_state.get("source_name", ""),
-                )
-                st.success(f"✅ {deleted_id} eliminado.")
-                st.rerun()
     else:
         st.info("No hay Test Cases para editar.")
 
@@ -2847,6 +2909,35 @@ if result:
         else:
             st.warning("⚠️ El Test Plan seleccionado no tiene Suites consultables.")
 
+        # Campos obligatorios específicos del proyecto.
+        st.markdown("### Datos obligatorios del proyecto para crear el Test Case")
+        st.caption(
+            "Azure exige estos campos personalizados en este proyecto. "
+            "IDPadre debe corresponder al Work Item padre real; no se sustituye por el Test Plan ni por la Suite."
+        )
+        inferred_parent = ""
+        if selected_publish_ids:
+            first_case = publish_case_map.get(selected_publish_ids[0], {})
+            for key in ("IDPadre", "ID Padre", "Parent ID", "ParentId", "parent_id", "id_padre"):
+                candidate = safe_text(first_case.get(key))
+                if candidate:
+                    inferred_parent = candidate
+                    break
+        id_padre_input = st.text_input(
+            "IDPadre (Work Item padre / HU)",
+            value=safe_text(st.session_state.get("azure_id_padre"), inferred_parent),
+            placeholder="Ej. 12345",
+            key="azure_id_padre_input",
+            help="Campo requerido por Azure. No uses el ID del Test Plan ni el de la Suite salvo que ese sea realmente el Work Item padre."
+        )
+        st.session_state.azure_id_padre = id_padre_input.strip()
+        tipo_origen_input = st.text_input(
+            "Tipo Origen Proyecto",
+            value=safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto"),
+            key="azure_tipo_origen_input",
+        )
+        st.session_state.azure_tipo_origen_proyecto = tipo_origen_input.strip() or "Proyecto"
+
         # Preflight GET para bloquear duplicados antes del POST.
         if target_suite and selected_publish_ids:
             try:
@@ -2869,7 +2960,16 @@ if result:
                 + ". La creación queda bloqueada para evitar duplicados."
             )
 
-        ready = bool(selected_publish_ids and target_plan and target_suite and not duplicate_titles)
+        ready = bool(
+            selected_publish_ids
+            and target_plan
+            and target_suite
+            and not duplicate_titles
+            and safe_text(st.session_state.get("azure_id_padre"))
+            and safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
+        )
+        if selected_publish_ids and target_plan and target_suite and not safe_text(st.session_state.get("azure_id_padre")):
+            st.warning("⚠️ Falta IDPadre. La creación queda bloqueada porque Azure lo exige.")
         if ready:
             st.success(
                 f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
