@@ -2317,33 +2317,47 @@ with st.sidebar:
         if all(checks.values()):
             st.success(
                 "✅ La referencia contiene la estructura aprobada. "
-                "Ahora el agente puede preparar un CP nuevo en PREVIEW, sin enviarlo a Azure."
+                "Puede utilizarse como referencia completa para preparar un CP nuevo en PREVIEW."
             )
         else:
             st.warning(
-                "⚠️ La referencia no contiene todos los elementos esperados. "
-                "Se conserva como referencia, pero no se inventan los elementos faltantes."
+                "⚠️ La referencia seleccionada no contiene todos los elementos esperados. "
+                "Se conserva como referencia visual/estructural. Los elementos faltantes "
+                "NO se inventan desde Azure; el CP nuevo se construye con nuestra estructura aprobada "
+                "y la documentación de la HU."
             )
 
         current_result = st.session_state.get("result_json")
-        if current_result and all(checks.values()):
+        if current_result:
             st.markdown("### 4️⃣ Preparar nuevo Test Case — PREVIEW")
             st.caption(
-                "El agente toma la estructura del Test Case de referencia y la aplica "
-                "al CP generado. En esta etapa NO se crea ni modifica ningún recurso en Azure."
+                "El Test Case de Azure se utiliza únicamente como referencia de estructura y estilo. "
+                "Nuestra estructura aprobada y la HU/documentación siguen siendo la fuente funcional. "
+                "En esta etapa NO se crea ni modifica ningún recurso en Azure."
             )
+            if not all(checks.values()):
+                st.info(
+                    "ℹ️ La referencia no cumple al 100 %, pero podemos continuar con el PREVIEW. "
+                    "Los faltantes quedan sujetos a nuestra estructura aprobada y a revisión funcional."
+                )
             if st.button(
-                "🧩 Preparar CP nuevo con la estructura de referencia",
+                "🧩 Preparar CP nuevo con la estructura aprobada",
                 key="azure_prepare_new_cp_preview",
             ):
                 try:
                     generated_cases = current_result.get("TEST_CASES", []) or []
                     if not generated_cases:
                         raise ValueError("No hay Test Cases generados para preparar el preview.")
-                    st.session_state.azure_reference_preview = _build_reference_preview_case(
+
+                    # La resolución del Caso de Uso ya se ejecutó durante la validación
+                    # de la generación. Aquí se conserva la regla aprobada: Related Use Case
+                    # -> Casos de Uso Relacionados -> título del CU de la HU -> alerta.
+                    preview_case = _build_reference_preview_case(
                         reference_detail,
                         generated_cases[0],
                     )
+                    st.session_state.azure_reference_preview = preview_case
+                    st.session_state.azure_functional_review_decision = "Pendiente"
                 except Exception as exc:
                     st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
 
