@@ -6,6 +6,7 @@ import re
 import time
 from pathlib import Path
 from datetime import datetime
+import html
 from html import escape
 
 import pandas as pd
@@ -19,14 +20,6 @@ from urllib.request import Request, urlopen
 
 class AzureDevOpsError(RuntimeError):
     pass
-
-def _html(value):
-    """Escapa texto para mostrar contenido HTML de Azure de forma segura."""
-    import html as _html_module
-    if value is None:
-        return ""
-    return _html_module.escape(str(value), quote=False)
-
 
 def _az_config():
     try:
@@ -230,7 +223,7 @@ def list_test_cases(plan_id, suite_id):
 def _az_parse_steps_xml(xml_text):
     if not xml_text:
         return []
-    decoded = _html.unescape(str(xml_text))
+    decoded = html.unescape(str(xml_text))
     steps = []
     for match in re.finditer(r"<step\b[^>]*>.*?</step>", decoded, flags=re.I | re.S):
         node = match.group(0)
@@ -242,7 +235,7 @@ def _az_parse_steps_xml(xml_text):
         clean = []
         for value in vals[:2]:
             value = re.sub(r"<[^>]+>", "", value)
-            clean.append(_html.unescape(value).strip())
+            clean.append(html.unescape(value).strip())
         if clean:
             steps.append({
                 "Step #": len(steps) + 1,
@@ -1881,12 +1874,12 @@ def _reference_compare(detail):
     }
 
 def _reference_description_pretty(description):
-    raw = _html.unescape(safe_text(description))
+    raw = html.unescape(safe_text(description))
     raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
     raw = re.sub(r"(?i)</(div|p|li|ul|blockquote|strong|b)>", "\n", raw)
     raw = re.sub(r"(?i)<li[^>]*>", "• ", raw)
     raw = re.sub(r"<[^>]+>", "", raw)
-    raw = _html.unescape(raw)
+    raw = html.unescape(raw)
     raw = raw.replace("\xa0", " ")
     raw = re.sub(r"[ \t]+", " ", raw)
     raw = re.sub(r"\n\s*\n\s*\n+", "\n\n", raw).strip()
