@@ -325,6 +325,56 @@ def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
     return payload.get("value", payload if isinstance(payload, list) else [])
 
 
+def add_parent_relation_to_work_item(work_item_id, parent_id):
+    """Agrega Related Work -> Parent al Test Case creado.
+
+    Por solicitud funcional, el Parent se toma del ID de la Suite destino.
+    Azure debe aceptar ese ID como Work Item para que el vínculo Parent sea válido.
+    """
+    cfg = _az_config()
+    _az_validate(cfg)
+
+    work_item_id = safe_text(work_item_id)
+    parent_id = safe_text(parent_id)
+    if not work_item_id or not parent_id:
+        raise AzureDevOpsError(
+            "No se pudo configurar el Parent: falta el ID del Test Case o el ID de la Suite destino."
+        )
+
+    org = quote(cfg["org"], safe="")
+    project = quote(cfg["project"], safe="")
+    url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
+        f"{quote(str(work_item_id), safe='')}?api-version=7.1"
+    )
+
+    parent_url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
+        f"{quote(str(parent_id), safe='')}"
+    )
+
+    patch = [{
+        "op": "add",
+        "path": "/relations/-",
+        "value": {
+            "rel": "System.LinkTypes.Hierarchy-Reverse",
+            "url": parent_url,
+            "attributes": {
+                "comment": f"Parent configurado con el ID de la Suite destino {parent_id}."
+            },
+        },
+    }]
+
+    payload, _ = _az_request_json(
+        url,
+        cfg["pat"],
+        method="PATCH",
+        payload=patch,
+        content_type="application/json-patch+json",
+    )
+    return payload
+
+
 def create_selected_cases_in_azure(cases, target_plan, target_suite):
     """Crea y asocia los CP seleccionados, devolviendo resultado por caso."""
     created, work_item_ids, errors = [], [], []
@@ -335,12 +385,22 @@ def create_selected_cases_in_azure(cases, target_plan, target_suite):
             azure_id = wi.get("id")
             if not azure_id:
                 raise AzureDevOpsError("Azure no devolvió el ID del Work Item creado.")
+
+            # Related Work -> Parent: usar el ID de la Suite destino,
+            # tal como se solicitó para esta versión.
+            suite_parent_id = safe_text(target_suite.get("id"))
+            if not suite_parent_id:
+                raise AzureDevOpsError("La Suite destino no tiene un ID válido para configurar el Parent.")
+
+            add_parent_relation_to_work_item(azure_id, suite_parent_id)
+
             work_item_ids.append(int(azure_id))
             created.append({
                 "cp_id": cp_id,
                 "title": build_case_title(tc, cp_id),
                 "azure_id": int(azure_id),
-                "status": "Work Item creado; pendiente de asociar a Suite",
+                "parent_id": suite_parent_id,
+                "status": "Work Item creado, Parent configurado y pendiente de asociar a Suite",
             })
         except Exception as exc:
             errors.append({"cp_id": cp_id, "error": str(exc)})
@@ -2990,7 +3050,7 @@ if result:
         st.markdown("### Datos obligatorios del proyecto para crear el Test Case")
         st.caption(
             "Azure exige estos campos personalizados en este proyecto. "
-            "IDPadre debe corresponder al Work Item padre real; no se sustituye por el Test Plan ni por la Suite."
+            "El Related Work -> Parent del CP se configurará automáticamente con el ID de la Suite destino."
         )
         inferred_parent = ""
         if selected_publish_ids:
