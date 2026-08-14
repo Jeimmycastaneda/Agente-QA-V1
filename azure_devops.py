@@ -206,7 +206,7 @@ def list_test_suites(plan_id):
 def list_test_cases(plan_id, suite_id):
     """Read-only: list Test Cases in one selected Suite."""
     config = get_azure_config(); _validate_config(config)
-    path = f"Plans/{quote(str(plan_id), safe='')}/suites/{quote(str(suite_id), safe='')}/testcases"
+    path = f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase"
     url = _project_testplan_url(config, path) + "?api-version=7.1"
     payload, _ = _get_json(url, config["pat"])
     rows = []
