@@ -108,7 +108,7 @@ def list_test_plans(limit=10):
     for p in plans:
         rows.append({
             "id": p.get("id"),
-            "name": p.get("name", ""),
+            "name": _ui_text(p.get("name"), "Sin nombre"),
             "state": p.get("state", ""),
             "area_path": p.get("areaPath", ""),
             "iteration": p.get("iteration", ""),
@@ -141,7 +141,7 @@ def list_test_suites(plan_id):
         parent = s.get("parentSuite") if isinstance(s.get("parentSuite"), dict) else {}
         rows.append({
             "id": s.get("id"),
-            "name": s.get("name", ""),
+            "name": _ui_text(s.get("name"), "Suite sin nombre"),
             "suite_type": s.get("suiteType", ""),
             "plan_id": plan.get("id", plan_id),
             "parent_suite": parent.get("id"),
@@ -159,14 +159,54 @@ def list_test_cases(plan_id, suite_id):
         _az_testplan_url(cfg, path) + "?api-version=7.1",
         cfg["pat"],
     )
+
     rows = []
     for item in payload.get("value") or []:
-        wi = item.get("testCase") if isinstance(item.get("testCase"), dict) else item
+        # Azure puede devolver el Work Item en testCase, workItem o directamente.
+        wi = {}
+        for key in ("testCase", "workItem"):
+            candidate = item.get(key)
+            if isinstance(candidate, dict):
+                wi = candidate
+                break
+        if not wi:
+            wi = item if isinstance(item, dict) else {}
+
+        # ID robusto: primero id directo; luego posibles referencias/URLs.
+        raw_id = (
+            wi.get("id")
+            or item.get("id")
+            or (wi.get("workItem") or {}).get("id") if isinstance(wi.get("workItem"), dict) else None
+        )
+        if not raw_id:
+            for container in (wi, item):
+                for key in ("url", "href"):
+                    value = container.get(key) if isinstance(container, dict) else None
+                    if value:
+                        match = re.search(r"/workitems/(\d+)(?:[/?]|$)", str(value), re.I)
+                        if match:
+                            raw_id = match.group(1)
+                            break
+                if raw_id:
+                    break
+
+        title = (
+            wi.get("name")
+            or wi.get("title")
+            or item.get("name")
+            or item.get("title")
+        )
+
+        # No mostrar registros sin ID: son referencias incompletas y producen "None —".
+        if raw_id is None or str(raw_id).strip() == "":
+            continue
+
         rows.append({
-            "id": wi.get("id"),
-            "title": wi.get("name") or wi.get("title") or "",
+            "id": str(raw_id).strip(),
+            "title": _ui_text(title, "Test Case sin título"),
             "raw": item,
         })
+
     return rows
 
 def _az_parse_steps_xml(xml_text):
@@ -563,6 +603,14 @@ SCHEMA = {
     },
     "required": ["USE_CASES", "TEST_CASES", "ALERTS", "COVERAGE"],
 }
+
+
+def _ui_text(value, default=""):
+    """Texto seguro para UI: nunca muestra el literal None."""
+    if value is None:
+        return default
+    value = str(value).strip()
+    return value if value else default
 
 
 def safe_text(value, default="", *fallbacks):
@@ -2010,7 +2058,10 @@ with st.sidebar:
 
     plans = st.session_state.get("azure_reference_plans", [])
     if plans:
-        plan_options = [f"{p.get('id')} — {p.get('name', '')}" for p in plans]
+        plan_options = [
+            f"{_ui_text(p.get('id'), 'SIN ID')} — {_ui_text(p.get('name'), 'Test Plan sin nombre')}"
+            for p in plans
+        ]
         selected_plan_label = st.selectbox(
             "1️⃣ Test Plan",
             plan_options,
@@ -2037,7 +2088,10 @@ with st.sidebar:
 
     suites = st.session_state.get("azure_reference_suites", [])
     if suites:
-        suite_options = [f"{s.get('id')} — {s.get('name', '')}" for s in suites]
+        suite_options = [
+            f"{_ui_text(s.get('id'), 'SIN ID')} — {_ui_text(s.get('name'), 'Suite sin nombre')}"
+            for s in suites
+        ]
         selected_suite_label = st.selectbox(
             "2️⃣ Suite",
             suite_options,
@@ -2053,6 +2107,8 @@ with st.sidebar:
                 st.session_state.azure_reference_suite_id = selected_suite_id
                 st.session_state.azure_reference_cases = cases
                 st.session_state.azure_reference_case_id = None
+                # Evita que Streamlit conserve la selección "None —" de una ejecución anterior.
+                st.session_state.pop("azure_reference_case_select", None)
                 st.session_state.azure_reference_detail = None
                 st.session_state.azure_reference_preview = None
                 st.success(f"✅ {len(cases)} Test Case(s) encontrados.")
@@ -2062,20 +2118,39 @@ with st.sidebar:
                 st.error(f"❌ Error inesperado al consultar Test Cases: {exc}")
 
     cases = st.session_state.get("azure_reference_cases", [])
+    st.markdown("### 3️⃣ Test Case de referencia")
+    if not cases and st.session_state.get("azure_reference_suite_id"):
+        st.warning(
+            "⚠️ La Suite seleccionada no tiene Test Cases consultables. "
+            "Selecciona otra Suite del mismo Test Plan y vuelve a consultar."
+        )
     if cases:
-        st.markdown("### 3️⃣ Test Case de referencia")
-        case_options = [f"{c.get('id')} — {c.get('title', '')}" for c in cases]
+        # Solo llegan aquí Test Cases con ID válido; por seguridad filtramos cualquier residuo.
+        valid_cases = [
+            c for c in cases
+            if c.get("id") is not None and str(c.get("id")).strip() != ""
+        ]
+        if not valid_cases:
+            st.warning("⚠️ Azure devolvió registros, pero ninguno tiene un ID de Test Case válido.")
+            st.stop()
+
+        case_options = [
+            f"{_ui_text(c.get('id'), 'SIN ID')} — {_ui_text(c.get('title'), 'Test Case sin título')}"
+            for c in valid_cases
+        ]
         selected_case_label = st.selectbox(
             "Selecciona un Test Case real de Azure para comparar su estructura",
             case_options,
             key="azure_reference_case_select",
         )
-        selected_case_id = cases[case_options.index(selected_case_label)].get("id")
+        selected_case_id = valid_cases[case_options.index(selected_case_label)].get("id")
 
         if st.button("🔬 Consultar y comparar", key="azure_reference_compare"):
             try:
                 with st.spinner("Leyendo el Test Case real de Azure..."):
                     detail = get_test_case_detail(selected_case_id)
+                if not selected_case_id:
+                    raise AzureDevOpsError("El Test Case seleccionado no tiene un ID válido.")
                 st.session_state.azure_reference_case_id = selected_case_id
                 st.session_state.azure_reference_detail = detail
                 st.session_state.azure_reference_preview = None
