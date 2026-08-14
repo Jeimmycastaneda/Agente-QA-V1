@@ -137,10 +137,32 @@ def _azure_steps_xml(steps):
 
 
 def _azure_description_html(description):
-    """Convierte la Description aprobada a HTML legible para Azure sin inventar contenido."""
-    text = safe_text(description).replace("\r\n", "\n").replace("\r", "\n")
+    """Convierte la Description del CP a HTML real para Azure DevOps.
+
+    Azure DevOps no debe recibir Markdown (**) ni \n literales. Cada bloque se
+    envía como un párrafo HTML independiente y el Caso de Uso como una lista
+    HTML real para que Azure renderice separación y viñetas.
+    """
+    text = safe_text(description)
     if not text:
         return ""
+
+    # Convierte \n literales (dos caracteres) en saltos reales.
+    text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+    text = text.replace("\\r", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Si llega Markdown, conviértelo antes de escapar el contenido.
+    text = html.unescape(text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</?(?:div|p|span|blockquote)[^>]*>", "\n", text, flags=re.I)
+    text = re.sub(r"</?(?:ul|ol)[^>]*>", "\n", text, flags=re.I)
+    text = re.sub(r"<li[^>]*>", "- ", text, flags=re.I)
+    text = re.sub(r"</li>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Separa etiquetas aunque el modelo las haya pegado.
     labels = [
         "Producto:",
         "Módulo:",
@@ -149,18 +171,61 @@ def _azure_description_html(description):
         "Precondiciones:",
         "Caso de uso relacionado:",
     ]
-    text = html.unescape(text)
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
-    text = re.sub(r"</?(?:div|p|span|strong|b|ul|li|blockquote)[^>]*>", "\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    escaped = html.escape(text, quote=False)
     for label in labels:
-        escaped = escaped.replace(html.escape(label), f"<b>{html.escape(label)}</b>")
-    escaped = escaped.replace("\n\n", "<br/><br/>").replace("\n", "<br/>")
-    return f"<div>{escaped}</div>"
+        text = re.sub(
+            rf"\s*{re.escape(label)}\s*",
+            f"\n{label} ",
+            text,
+            count=1,
+            flags=re.I,
+        )
 
+    # Normaliza viñetas y espacios sin perder separación entre párrafos.
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"(?m)^\s*[•●▪◦]\s*", "- ", text)
+    text = re.sub(r"(?m)^\s*[o]\s+", "- ", text)
+    text = re.sub(r"(?m)^\s*[-–—]\s*", "- ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    # Captura cada sección hasta la siguiente.
+    block_pattern = re.compile(
+        r"(?ms)^(Producto:|Módulo:|Descripción:|Resultado esperado de la prueba:|"
+        r"Precondiciones:|Caso de uso relacionado:)\s*(.*?)(?=\n(?:Producto:|Módulo:|"
+        r"Descripción:|Resultado esperado de la prueba:|Precondiciones:|Caso de uso relacionado:)|$)",
+        re.I,
+    )
+    blocks = block_pattern.findall(text)
+
+    if not blocks:
+        return f"<p>{html.escape(text, quote=False)}</p>"
+
+    html_blocks = []
+    for label, content in blocks:
+        label = next((x for x in labels if x.lower() == label.lower()), label)
+        content = content.strip()
+        if not content:
+            content = "Pendiente"
+
+        lines = [line.strip() for line in content.split("\n") if line.strip()]
+        bullets = [line[2:].strip() for line in lines if line.startswith("- ")]
+        normal = [line for line in lines if not line.startswith("- ")]
+        label_html = f"<strong>{html.escape(label)}</strong>"
+
+        if label.rstrip(":") == "Caso de uso relacionado" or (bullets and not normal):
+            items = bullets or [content]
+            list_html = "".join(
+                f"<li>{html.escape(item, quote=False)}</li>" for item in items
+            )
+            html_blocks.append(f"<p>{label_html}</p><ul>{list_html}</ul>")
+        else:
+            content_html = "<br/>".join(
+                html.escape(line, quote=False) for line in lines
+            )
+            html_blocks.append(f"<p>{label_html} {content_html}</p>")
+
+    # Párrafo vacío explícito entre secciones: Azure lo renderiza como espacio.
+    return "<p>&nbsp;</p>".join(html_blocks)
 
 def _get_id_padre(tc):
     """Obtiene el ID padre explícito. Nunca usa el Test Plan como sustituto."""
@@ -992,7 +1057,6 @@ def format_description_for_azure(description):
     text = re.sub(r"\n\s*[-–—]\s*", "\n- ", text)
 
     # Si hay bullets pegados después de una oración, sepáralos.
-    text = re.sub(r"\s+(-\s+)", r"\n\1", text)
 
     # Limpieza de saltos excesivos.
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
