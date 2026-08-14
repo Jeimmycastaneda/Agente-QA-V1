@@ -73,6 +73,182 @@ def _az_get_json(url, pat):
             f"No fue posible comunicarse con Azure DevOps: {exc.reason}"
         ) from exc
 
+
+def _az_request_json(url, pat, method="POST", payload=None, content_type="application/json"):
+    """Solicitud Azure con escritura explícita; solo se invoca desde la confirmación de carga."""
+    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    req = Request(
+        url,
+        method=method,
+        data=body,
+        headers={
+            "Authorization": f"Basic {token}",
+            "Accept": "application/json",
+            "Content-Type": content_type,
+            "User-Agent": "Agente-QA-Streamlit/1.0",
+        },
+    )
+    try:
+        with urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}, response.headers
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1800]
+        except Exception:
+            pass
+        if exc.code in (401, 403):
+            raise AzureDevOpsError(
+                f"Azure rechazó la operación de escritura (HTTP {exc.code}). "
+                "Verifica que el PAT tenga permisos de Work Items/Test Plans y esté vigente."
+            ) from exc
+        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
+    except URLError as exc:
+        raise AzureDevOpsError(f"No fue posible comunicarse con Azure DevOps: {exc.reason}") from exc
+
+
+def _azure_steps_xml(steps):
+    """Construye Microsoft.VSTS.TCM.Steps con Action + Expected."""
+    nodes = []
+    for idx, step in enumerate(steps or [], start=1):
+        if not isinstance(step, dict):
+            continue
+        action = safe_text(step.get("Action"), step.get("action"), step.get("Step"))
+        expected = safe_text(
+            step.get("Expected value"),
+            step.get("Expected"),
+            step.get("expected"),
+        )
+        if not action and not expected:
+            continue
+        action_html = html.escape(action, quote=False).replace("\n", "<br />")
+        expected_html = html.escape(expected, quote=False).replace("\n", "<br />")
+        nodes.append(
+            f'<step id="{idx}" type="ActionStep">'
+            f'<parameterizedString isformatted="true">{action_html}</parameterizedString>'
+            f'<parameterizedString isformatted="true">{expected_html}</parameterizedString>'
+            f'</step>'
+        )
+    if not nodes:
+        return '<steps id="0" last="0"></steps>'
+    return f'<steps id="0" last="{len(nodes)}">{"".join(nodes)}</steps>'
+
+
+def _azure_description_html(description):
+    """Convierte la Description aprobada a HTML legible para Azure sin inventar contenido."""
+    text = safe_text(description).replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+    labels = [
+        "Producto:",
+        "Módulo:",
+        "Descripción:",
+        "Resultado esperado de la prueba:",
+        "Precondiciones:",
+        "Caso de uso relacionado:",
+    ]
+    text = html.unescape(text)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</?(?:div|p|span|strong|b|ul|li|blockquote)[^>]*>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    escaped = html.escape(text, quote=False)
+    for label in labels:
+        escaped = escaped.replace(html.escape(label), f"<b>{html.escape(label)}</b>")
+    escaped = escaped.replace("\n\n", "<br/><br/>").replace("\n", "<br/>")
+    return f"<div>{escaped}</div>"
+
+
+def create_azure_test_case_work_item(tc, target_plan):
+    """Crea un Work Item de tipo Test Case. Solo se llama al confirmar."""
+    cfg = _az_config()
+    _az_validate(cfg)
+    case_id = safe_text(tc.get("ID"), "CP-PREVIEW")
+    title = build_case_title(tc, case_id)
+    description = safe_text(tc.get("Description"))
+    if not description:
+        description = build_azure_description(
+            safe_text(tc.get("Product"), "Cotizadores Web"),
+            safe_text(tc.get("Module"), "Cotizador Autos Colectivos"),
+            safe_text(tc.get("Scenario"), title),
+            safe_text(tc.get("Expected Result"), "Pendiente"),
+            safe_text(tc.get("Preconditions"), "Pendiente"),
+            safe_text(tc.get("Related Use Case"), "Pendiente"),
+        )
+    patch = [
+        {"op": "add", "path": "/fields/System.Title", "value": title},
+        {"op": "add", "path": "/fields/System.Description", "value": _azure_description_html(description)},
+        {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": _azure_steps_xml(safe_steps(tc))},
+    ]
+    area_path = safe_text(target_plan.get("area_path"))
+    iteration = safe_text(target_plan.get("iteration"))
+    if area_path:
+        patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+    if iteration:
+        patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration})
+
+    org = quote(cfg["org"], safe="")
+    project = quote(cfg["project"], safe="")
+    url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/$Test%20Case?api-version=7.1"
+    payload, _ = _az_request_json(
+        url,
+        cfg["pat"],
+        method="POST",
+        payload=patch,
+        content_type="application/json-patch+json",
+    )
+    return payload
+
+
+def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
+    """Asocia los Work Items recién creados a la Suite destino."""
+    cfg = _az_config()
+    _az_validate(cfg)
+    if not work_item_ids:
+        return []
+    path = f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase"
+    url = _az_testplan_url(cfg, path) + "?api-version=7.1"
+    body = [{"workItem": {"id": int(wid)}} for wid in work_item_ids]
+    payload, _ = _az_request_json(url, cfg["pat"], method="POST", payload=body)
+    return payload.get("value", payload if isinstance(payload, list) else [])
+
+
+def create_selected_cases_in_azure(cases, target_plan, target_suite):
+    """Crea y asocia los CP seleccionados, devolviendo resultado por caso."""
+    created, work_item_ids, errors = [], [], []
+    for tc in cases:
+        cp_id = safe_text(tc.get("ID"), "CP-PREVIEW")
+        try:
+            wi = create_azure_test_case_work_item(tc, target_plan)
+            azure_id = wi.get("id")
+            if not azure_id:
+                raise AzureDevOpsError("Azure no devolvió el ID del Work Item creado.")
+            work_item_ids.append(int(azure_id))
+            created.append({
+                "cp_id": cp_id,
+                "title": build_case_title(tc, cp_id),
+                "azure_id": int(azure_id),
+                "status": "Work Item creado; pendiente de asociar a Suite",
+            })
+        except Exception as exc:
+            errors.append({"cp_id": cp_id, "error": str(exc)})
+
+    if work_item_ids:
+        try:
+            add_test_cases_to_suite(target_plan["id"], target_suite["id"], work_item_ids)
+            for row in created:
+                row["status"] = "Creado y asociado a la Suite"
+        except Exception as exc:
+            for row in created:
+                row["status"] = "Work Item creado, pero NO se pudo asociar a la Suite"
+                row["association_error"] = str(exc)
+            errors.append({"cp_id": "LOTE", "error": f"No se pudo asociar el lote a la Suite: {exc}"})
+    return {"created": created, "errors": errors}
+
+
 def test_connection():
     cfg = _az_config()
     _az_validate(cfg)
@@ -506,7 +682,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V39-EDICION-CP-PREVIEW-REVISION-FUNCIONAL"
+APP_VERSION = "V42-REVISION-CP-Y-CARGA-CONTROLADA-AZURE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -2019,6 +2195,11 @@ for _key, _default in {
     "azure_reference_detail": None,
     "azure_reference_preview": None,
     "azure_preview_edit_mode": False,
+    "azure_target_plan_id": None,
+    "azure_target_suite_id": None,
+    "azure_target_suites": [],
+    "azure_publish_selection": "Un solo CP",
+    "azure_publish_results": None,
 }.items():
     if _key not in st.session_state:
         st.session_state[_key] = _default
@@ -2095,7 +2276,7 @@ with st.sidebar:
     st.markdown("### 📋 Test Plans")
     st.caption(
         "Consulta de solo lectura. Solo se muestran los 10 Test Plans más recientes. "
-        "No crea, edita ni elimina Test Plans, Suites ni Test Cases."
+        "La creación de Test Cases se realiza únicamente en el bloque final de confirmación."
     )
 
     if st.button("📋 Consultar 10 Test Plans", key="azure_list_test_plans"):
@@ -2590,6 +2771,161 @@ if result:
         st.error(
             "🚫 Descargas deshabilitadas: la cobertura mínima por CU no se cumple."
         )
+
+    # ========================================================
+    # CARGA CONTROLADA EN AZURE — DOS PASOS
+    # ========================================================
+    st.divider()
+    st.subheader("🚀 Cargar CP en Azure DevOps")
+    st.caption(
+        "La creación real ocurre únicamente después de seleccionar CP, Test Plan y Suite "
+        "y confirmar explícitamente el resumen."
+    )
+
+    publish_cases = result.get("TEST_CASES", []) or []
+    publish_case_map = {safe_text(tc.get("ID")): tc for tc in publish_cases if safe_text(tc.get("ID"))}
+
+    st.markdown("### 1️⃣ Seleccionar CP y destino")
+    selection_mode = st.radio(
+        "Casos a cargar",
+        ["Un solo CP", "Seleccionar varios CP", "Todos los CP"],
+        horizontal=True,
+        key="azure_publish_selection",
+    )
+    selected_publish_ids = []
+    labels = list(publish_case_map.keys())
+    if selection_mode == "Un solo CP":
+        if labels:
+            chosen = st.selectbox(
+                "CP a cargar",
+                labels,
+                format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
+                key="azure_publish_single_case",
+            )
+            selected_publish_ids = [chosen]
+    elif selection_mode == "Seleccionar varios CP":
+        selected_publish_ids = st.multiselect(
+            "Selecciona los CP que deseas cargar",
+            labels,
+            format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
+            key="azure_publish_multi_cases",
+        )
+    else:
+        selected_publish_ids = labels
+        st.info(f"Se cargarán los {len(selected_publish_ids)} CP generados actualmente.")
+
+    target_plans = st.session_state.get("azure_reference_plans", []) or []
+    target_plan = None
+    target_suite = None
+    duplicate_titles = []
+
+    if not target_plans:
+        st.warning("⚠️ Primero consulta los 10 Test Plans más recientes para seleccionar el destino.")
+    else:
+        plan_labels = [f"{p.get('id')} — {_ui_text(p.get('name'), 'Sin nombre')}" for p in target_plans]
+        plan_label = st.selectbox("Test Plan destino", plan_labels, key="azure_publish_target_plan")
+        target_plan = target_plans[plan_labels.index(plan_label)]
+        target_plan_id = str(target_plan.get("id"))
+
+        if st.session_state.get("azure_target_plan_id") != target_plan_id:
+            st.session_state.azure_target_plan_id = target_plan_id
+            st.session_state.azure_target_suite_id = None
+            st.session_state.azure_target_suites = []
+            try:
+                with st.spinner("Consultando Suites del Test Plan destino..."):
+                    st.session_state.azure_target_suites = list_test_suites(target_plan_id)
+            except Exception as exc:
+                st.session_state.azure_target_suites = []
+                st.error(f"❌ No se pudieron consultar las Suites del destino: {exc}")
+
+        target_suites = st.session_state.get("azure_target_suites", []) or []
+        if target_suites:
+            suite_labels = [f"{s.get('id')} — {_ui_text(s.get('name'), 'Suite sin nombre')}" for s in target_suites]
+            suite_label = st.selectbox("Suite destino", suite_labels, key="azure_publish_target_suite")
+            target_suite = target_suites[suite_labels.index(suite_label)]
+            st.session_state.azure_target_suite_id = str(target_suite.get("id"))
+        else:
+            st.warning("⚠️ El Test Plan seleccionado no tiene Suites consultables.")
+
+        # Preflight GET para bloquear duplicados antes del POST.
+        if target_suite and selected_publish_ids:
+            try:
+                existing = list_test_cases(target_plan_id, target_suite.get("id"))
+                existing_titles = {
+                    re.sub(r"\s+", " ", safe_text(row.get("title"))).strip().casefold()
+                    for row in existing
+                }
+                for cp_id in selected_publish_ids:
+                    title = build_case_title(publish_case_map[cp_id], cp_id)
+                    if re.sub(r"\s+", " ", title).strip().casefold() in existing_titles:
+                        duplicate_titles.append(cp_id)
+            except Exception as exc:
+                st.warning(f"⚠️ No fue posible validar duplicados antes de la creación: {exc}")
+
+        if duplicate_titles:
+            st.error(
+                "🚫 Se detectaron títulos que ya existen en la Suite destino: "
+                + ", ".join(duplicate_titles)
+                + ". La creación queda bloqueada para evitar duplicados."
+            )
+
+        ready = bool(selected_publish_ids and target_plan and target_suite and not duplicate_titles)
+        if ready:
+            st.success(
+                f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
+                f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
+                f"CP seleccionados: {len(selected_publish_ids)}"
+            )
+
+            st.markdown("### 2️⃣ Revisar y confirmar creación")
+            review_rows = []
+            for cp_id in selected_publish_ids:
+                tc = publish_case_map[cp_id]
+                review_rows.append({
+                    "CP": cp_id,
+                    "Título": build_case_title(tc, cp_id),
+                    "Caso de Uso": safe_text(tc.get("Related Use Case"), "Pendiente"),
+                    "Steps": len(safe_steps(tc)),
+                })
+            st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
+            st.warning(
+                "⚠️ Este botón sí modifica Azure DevOps: crea los Test Cases y los asocia a la Suite seleccionada."
+            )
+            confirm = st.checkbox(
+                "Confirmo que los CP, Test Plan y Suite son correctos y autorizo la creación en Azure.",
+                key="azure_publish_confirm",
+            )
+            if st.button(
+                "🟢 Confirmar y crear en Azure DevOps",
+                type="primary",
+                disabled=not confirm,
+                key="azure_publish_execute",
+            ):
+                try:
+                    selected_cases = [publish_case_map[cp_id] for cp_id in selected_publish_ids]
+                    with st.spinner(f"Creando {len(selected_cases)} Test Case(s) y asociándolos a la Suite..."):
+                        publish_result = create_selected_cases_in_azure(selected_cases, target_plan, target_suite)
+                    st.session_state.azure_publish_results = publish_result
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"❌ No se pudo completar la creación en Azure: {exc}")
+
+    publish_result = st.session_state.get("azure_publish_results")
+    if publish_result:
+        st.markdown("### 📌 Resultado de la creación en Azure")
+        if publish_result.get("created"):
+            rows = [
+                {
+                    "CP generado": row.get("cp_id"),
+                    "Azure ID": row.get("azure_id"),
+                    "Estado": row.get("status"),
+                }
+                for row in publish_result["created"]
+            ]
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            st.success(f"✅ {len(rows)} CP procesados en Azure.")
+        for err in publish_result.get("errors", []):
+            st.error(f"❌ {err.get('cp_id')}: {err.get('error')}")
 
     # IMPORTANTE: el Excel se reconstruye SIEMPRE con el estado actual de
     # `result`, después de aplicar cualquier edición realizada en el editor.
