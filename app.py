@@ -11,7 +11,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 from editor_azure import render_azure_style_editor, delete_test_case
-from azure_devops import AzureDevOpsError, test_connection
+from azure_devops import AzureDevOpsError, list_test_plans, test_connection
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1667,6 +1667,32 @@ with st.sidebar:
             st.error(f"❌ No se pudo conectar con Azure DevOps: {exc}")
         except Exception as exc:
             st.error(f"❌ Error inesperado al probar Azure DevOps: {exc}")
+
+    st.markdown("### 📋 Test Plans")
+    st.caption(
+        "Consulta de solo lectura. El agente únicamente lee los Test Plans del proyecto. "
+        "No crea, edita ni elimina Test Plans, Suites, Test Cases ni Work Items."
+    )
+    if st.button("📋 Consultar Test Plans", key="azure_list_test_plans"):
+        try:
+            with st.spinner("Consultando Test Plans de Azure DevOps..."):
+                plans_result = list_test_plans()
+            st.success(
+                f"✅ Consulta correcta: {plans_result['count']} Test Plan(s) encontrados."
+            )
+            if plans_result["plans"]:
+                st.dataframe(
+                    pd.DataFrame(plans_result["plans"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info("No se encontraron Test Plans visibles para este proyecto.")
+            st.info(plans_result["message"])
+        except AzureDevOpsError as exc:
+            st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
+        except Exception as exc:
+            st.error(f"❌ Error inesperado al consultar Test Plans: {exc}")
 
 
 st.subheader("📁 Carga de Documento")
