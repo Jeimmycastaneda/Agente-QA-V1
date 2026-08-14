@@ -2972,6 +2972,34 @@ if result:
         )
 
     # ========================================================
+    st.subheader("🧪 Casos generados")
+
+    preview_rows = []
+
+    for tc in result["TEST_CASES"]:
+        preview_rows.append({
+            "ID": safe_text(tc.get("ID")),
+            "Title": build_case_title(
+                tc,
+                normalize_case_id(
+                    tc.get("ID"),
+                    safe_text(tc.get("Module"), "GENERAL"),
+                    len(preview_rows) + 1,
+                    EXCEL_CONFIGS[selected_config]["title_prefix"],
+                ),
+            ),
+            "Module": safe_text(tc.get("Module")),
+            "Scenario Type": safe_text(tc.get("Scenario Type")),
+            "Steps": len(safe_steps(tc)),
+        })
+
+    st.dataframe(
+        pd.DataFrame(preview_rows),
+        width="stretch",
+    )
+
+    st.markdown("---")
+    st.info("🔄 **Sincronización con Azure DevOps:** revisa los CP generados arriba y luego selecciona cuáles cargar, el Test Plan y la Suite destino.")
     # CARGA CONTROLADA EN AZURE — DOS PASOS
     # ========================================================
     st.divider()
@@ -3233,28 +3261,3 @@ if result:
     with st.expander("🔎 Ver JSON generado", expanded=False):
         st.json(result)
 
-    st.subheader("🧪 Casos generados")
-
-    preview_rows = []
-
-    for tc in result["TEST_CASES"]:
-        preview_rows.append({
-            "ID": safe_text(tc.get("ID")),
-            "Title": build_case_title(
-                tc,
-                normalize_case_id(
-                    tc.get("ID"),
-                    safe_text(tc.get("Module"), "GENERAL"),
-                    len(preview_rows) + 1,
-                    EXCEL_CONFIGS[selected_config]["title_prefix"],
-                ),
-            ),
-            "Module": safe_text(tc.get("Module")),
-            "Scenario Type": safe_text(tc.get("Scenario Type")),
-            "Steps": len(safe_steps(tc)),
-        })
-
-    st.dataframe(
-        pd.DataFrame(preview_rows),
-        width="stretch",
-    )
