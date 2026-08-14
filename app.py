@@ -312,6 +312,50 @@ def create_azure_test_case_work_item(tc, target_plan):
     return payload
 
 
+def add_parent_relation_to_work_item(child_work_item_id, parent_work_item_id):
+    """Agrega en Related Work el vínculo Parent del CP hacia un Work Item padre.
+
+    Azure DevOps representa el vínculo Parent desde el hijo mediante
+    System.LinkTypes.Hierarchy-Reverse. El ID recibido debe ser realmente un
+    Work Item; un ID de Suite de Test Plans no es automáticamente un Work Item.
+    """
+    cfg = _az_config()
+    _az_validate(cfg)
+    child_id = safe_text(child_work_item_id)
+    parent_id = safe_text(parent_work_item_id)
+    if not child_id or not parent_id or not parent_id.isdigit():
+        raise AzureDevOpsError(
+            "No se pudo configurar Related Work > Parent: el ID de destino debe ser un Work Item numérico."
+        )
+
+    org = quote(cfg["org"], safe="")
+    project = quote(cfg["project"], safe="")
+    parent_url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workItems/{int(parent_id)}"
+    child_url = (
+        f"https://dev.azure.com/{org}/{project}/_apis/wit/workItems/"
+        f"{int(child_id)}?api-version=7.1"
+    )
+    patch = [{
+        "op": "add",
+        "path": "/relations/-",
+        "value": {
+            "rel": "System.LinkTypes.Hierarchy-Reverse",
+            "url": parent_url,
+            "attributes": {
+                "comment": "Parent configurado desde la Suite destino seleccionada."
+            },
+        },
+    }]
+    payload, _ = _az_request_json(
+        child_url,
+        cfg["pat"],
+        method="PATCH",
+        payload=patch,
+        content_type="application/json-patch+json",
+    )
+    return payload
+
+
 def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
     """Asocia los Work Items recién creados a la Suite destino."""
     cfg = _az_config()
@@ -326,8 +370,16 @@ def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
 
 
 def create_selected_cases_in_azure(cases, target_plan, target_suite):
-    """Crea y asocia los CP seleccionados, devolviendo resultado por caso."""
+    """Crea y asocia los CP seleccionados, incluyendo Related Work > Parent.
+
+    El Parent se toma de la Suite destino seleccionada, tal como se solicita
+    en la pantalla de Related Work. Si el ID de la Suite no corresponde a un
+    Work Item válido en Azure, el CP se conserva creado y el error queda
+    informado para no ocultar una creación ya realizada.
+    """
     created, work_item_ids, errors = [], [], []
+    parent_target_id = safe_text(target_suite.get("id")) if isinstance(target_suite, dict) else ""
+
     for tc in cases:
         cp_id = safe_text(tc.get("ID"), "CP-PREVIEW")
         try:
@@ -336,12 +388,30 @@ def create_selected_cases_in_azure(cases, target_plan, target_suite):
             if not azure_id:
                 raise AzureDevOpsError("Azure no devolvió el ID del Work Item creado.")
             work_item_ids.append(int(azure_id))
-            created.append({
+            row = {
                 "cp_id": cp_id,
                 "title": build_case_title(tc, cp_id),
                 "azure_id": int(azure_id),
                 "status": "Work Item creado; pendiente de asociar a Suite",
-            })
+            }
+
+            # Related Work > Parent: se intenta con el ID de la Suite destino.
+            # Azure solo acepta aquí un Work Item real; si la Suite es una entidad
+            # de Test Plans y no un Work Item, se informa sin perder el CP creado.
+            if parent_target_id:
+                try:
+                    add_parent_relation_to_work_item(int(azure_id), parent_target_id)
+                    row["parent_status"] = f"Parent configurado: {parent_target_id}"
+                except Exception as parent_exc:
+                    row["parent_status"] = f"Parent no configurado: {parent_exc}"
+                    errors.append({
+                        "cp_id": cp_id,
+                        "error": f"CP creado, pero no se pudo configurar Related Work > Parent con la Suite {parent_target_id}: {parent_exc}",
+                    })
+            else:
+                row["parent_status"] = "Parent no configurado: la Suite destino no tiene ID."
+
+            created.append(row)
         except Exception as exc:
             errors.append({"cp_id": cp_id, "error": str(exc)})
 
@@ -1012,17 +1082,31 @@ def normalize_validation_method(value):
 
 
 
+def _remove_trailing_pipe(value):
+    """Elimina únicamente un pipe sobrante al final, conservando espacios y saltos internos."""
+    text = safe_text(value)
+    # Solo quita pipes que hayan quedado al final del contenido.
+    # No toca pipes internos ni modifica la separación entre secciones.
+    return re.sub(r"\s*\|\s*$", "", text).rstrip()
+
+
 def build_azure_description(product, module, description, expected, preconditions, related_use_case):
     """Construye la estructura aprobada de Description para Azure sin inventar datos."""
-    desc = safe_text(description)
+    product = _remove_trailing_pipe(product)
+    module = _remove_trailing_pipe(module)
+    desc = _remove_trailing_pipe(description)
+    expected = _remove_trailing_pipe(expected)
+    preconditions = _remove_trailing_pipe(preconditions)
+    related_use_case = _remove_trailing_pipe(related_use_case)
+
     desc = re.sub(r"(?mi)^\s*Descripción:\s*", "", desc, count=1).strip()
     return (
-        f"Producto: {safe_text(product, 'Pendiente')}\n\n"
-        f"Módulo: {safe_text(module, 'Pendiente')}\n\n"
+        f"Producto: {product or 'Pendiente'}\n\n"
+        f"Módulo: {module or 'Pendiente'}\n\n"
         f"Descripción: {desc or 'Pendiente'}\n\n"
-        f"Resultado esperado de la prueba: {safe_text(expected, 'Pendiente')}\n\n"
-        f"Precondiciones: {safe_text(preconditions, 'Pendiente')}\n\n"
-        f"Caso de uso relacionado: {safe_text(related_use_case, 'Pendiente')}"
+        f"Resultado esperado de la prueba: {expected or 'Pendiente'}\n\n"
+        f"Precondiciones: {preconditions or 'Pendiente'}\n\n"
+        f"Caso de uso relacionado: {related_use_case or 'Pendiente'}"
     )
 
 
