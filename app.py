@@ -150,73 +150,120 @@ def list_test_suites(plan_id):
     return rows
 
 def list_test_cases(plan_id, suite_id):
+    """
+    Consulta los Test Cases asociados a la Suite seleccionada, SOLO lectura.
+
+    Azure expone dos rutas GET válidas para esta información:
+      1) Test Plan API: /_apis/testplan/Plans/{plan}/Suites/{suite}/TestCase
+      2) Test API:      /_apis/test/Plans/{plan}/suites/{suite}/testcases
+
+    Algunas Suites pueden devolver 0 elementos por la primera ruta aunque
+    sí contengan Test Cases visibles en Azure. Si la primera consulta viene
+    vacía, se utiliza la segunda ruta oficial, también de solo lectura.
+    """
     cfg = _az_config()
     _az_validate(cfg)
+
+    def _normalize_case_rows(payload):
+        rows = []
+        values = payload.get("value") if isinstance(payload, dict) else []
+
+        for item in values or []:
+            if not isinstance(item, dict):
+                continue
+
+            # Azure puede devolver el Work Item en testCase, workItem
+            # o directamente en el objeto.
+            wi = {}
+            for key in ("testCase", "workItem"):
+                candidate = item.get(key)
+                if isinstance(candidate, dict):
+                    wi = candidate
+                    break
+            if not wi:
+                wi = item
+
+            nested_work_item = wi.get("workItem")
+            nested_id = (
+                nested_work_item.get("id")
+                if isinstance(nested_work_item, dict)
+                else None
+            )
+
+            raw_id = wi.get("id") or item.get("id") or nested_id
+
+            # Algunas respuestas entregan únicamente la URL del Work Item.
+            if not raw_id:
+                for container in (wi, item):
+                    if not isinstance(container, dict):
+                        continue
+                    for key in ("url", "href", "webUrl"):
+                        value = container.get(key)
+                        if value:
+                            match = re.search(
+                                r"/workitems/(\d+)(?:[/?]|$)",
+                                str(value),
+                                re.I,
+                            )
+                            if match:
+                                raw_id = match.group(1)
+                                break
+                    if raw_id:
+                        break
+
+            title = (
+                wi.get("name")
+                or wi.get("title")
+                or item.get("name")
+                or item.get("title")
+            )
+
+            # Nunca mostrar "None —".
+            if raw_id is None or str(raw_id).strip() == "":
+                continue
+
+            rows.append({
+                "id": str(raw_id).strip(),
+                "title": _ui_text(title, "Test Case sin título"),
+                "raw": item,
+            })
+
+        # Evita duplicados por ID.
+        unique = []
+        seen = set()
+        for row in rows:
+            if row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            unique.append(row)
+
+        return unique
+
+    # 1) Ruta oficial del servicio Test Plan.
     path = (
         f"Plans/{quote(str(plan_id), safe='')}/Suites/"
         f"{quote(str(suite_id), safe='')}/TestCase"
     )
     payload, _ = _az_get_json(
-        _az_testplan_url(cfg, path) + "?api-version=7.1",
+        _az_testplan_url(cfg, path)
+        + "?api-version=7.1&expand=true",
         cfg["pat"],
     )
+    rows = _normalize_case_rows(payload)
 
-    rows = []
-    for item in payload.get("value") or []:
-        # Azure puede devolver el Work Item en testCase, workItem o directamente.
-        wi = {}
-        for key in ("testCase", "workItem"):
-            candidate = item.get(key)
-            if isinstance(candidate, dict):
-                wi = candidate
-                break
-        if not wi:
-            wi = item if isinstance(item, dict) else {}
-
-        # ID robusto: primero id directo; luego posibles referencias/URLs.
-        # IMPORTANTE: no usar una expresión condicional sin paréntesis aquí.
-        # Azure normalmente devuelve el ID directamente en testCase.id.
-        # La versión anterior podía convertir ese ID válido en None
-        # porque el "else None" afectaba toda la expresión.
-        nested_work_item = wi.get("workItem")
-        nested_id = (
-            nested_work_item.get("id")
-            if isinstance(nested_work_item, dict)
-            else None
+    # 2) Fallback oficial del servicio Test.
+    # Solo se ejecuta si la primera consulta devuelve cero casos.
+    if not rows:
+        org = quote(cfg["org"], safe="")
+        project = quote(cfg["project"], safe="")
+        fallback_url = (
+            f"https://dev.azure.com/{org}/{project}/_apis/test/"
+            f"Plans/{quote(str(plan_id), safe='')}/"
+            f"suites/{quote(str(suite_id), safe='')}/testcases"
+            "?api-version=7.1"
         )
-        raw_id = (
-            wi.get("id")
-            or item.get("id")
-            or nested_id
-        )
-        if not raw_id:
-            for container in (wi, item):
-                for key in ("url", "href"):
-                    value = container.get(key) if isinstance(container, dict) else None
-                    if value:
-                        match = re.search(r"/workitems/(\d+)(?:[/?]|$)", str(value), re.I)
-                        if match:
-                            raw_id = match.group(1)
-                            break
-                if raw_id:
-                    break
-
-        title = (
-            wi.get("name")
-            or wi.get("title")
-            or item.get("name")
-            or item.get("title")
-        )
-
-        # No mostrar registros sin ID: son referencias incompletas y producen "None —".
-        if raw_id is None or str(raw_id).strip() == "":
-            continue
-
-        rows.append({
-            "id": str(raw_id).strip(),
-            "title": _ui_text(title, "Test Case sin título"),
-            "raw": item,
-        })
+        fallback_payload, _ = _az_get_json(fallback_url, cfg["pat"])
+        rows = _normalize_case_rows(fallback_payload)
 
     return rows
 
