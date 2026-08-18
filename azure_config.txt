@@ -1,9 +1,0 @@
-# Configuración Azure QA
-WORK_ITEM_TYPE=Test Case
-STATE=Design
-ID_PADRE=
-TIEMPO_REAL=
-AREA_PATH=
-ASSIGNED_TO=
-PRODUCTO=Cotizadores Web
-MODULO=Cotizador Autos Colectivos
