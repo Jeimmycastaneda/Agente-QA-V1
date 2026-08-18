@@ -256,7 +256,7 @@ def create_azure_test_case_work_item(tc, target_plan):
     cfg = _az_config()
     _az_validate(cfg)
     case_id = safe_text(tc.get("ID"), "CP-PREVIEW")
-    title = full_case_title(tc, case_id)
+    title = build_case_title(tc, case_id)
     description = safe_text(tc.get("Description"))
     if not description:
         description = build_azure_description(
@@ -266,7 +266,6 @@ def create_azure_test_case_work_item(tc, target_plan):
             safe_text(tc.get("Expected Result"), "Pendiente"),
             safe_text(tc.get("Preconditions"), "Pendiente"),
             safe_text(tc.get("Related Use Case"), "Pendiente"),
-            get_case_route(tc, safe_text(tc.get("Description"))),
         )
 
     id_padre = _get_id_padre(tc)
@@ -398,7 +397,7 @@ def create_selected_cases_in_azure(cases, target_plan, target_suite):
             work_item_ids.append(int(azure_id))
             created.append({
                 "cp_id": cp_id,
-                "title": full_case_title(tc, cp_id),
+                "title": build_case_title(tc, cp_id),
                 "azure_id": int(azure_id),
                 "parent_id": suite_parent_id,
                 "status": "Work Item creado, Parent configurado y pendiente de asociar a Suite",
@@ -941,7 +940,6 @@ SCHEMA = {
                     "Preconditions": {"type": "string"},
                     "Product": {"type": "string"},
                     "Module": {"type": "string"},
-                    "Route": {"type": "string"},
                     "Related Use Case": {"type": "string"},
                     "Criterion": {"type": "string"},
                     "Scenario": {"type": "string"},
@@ -1083,31 +1081,7 @@ def _remove_trailing_pipe(value):
     return text.rstrip()
 
 
-def get_case_route(tc, description=""):
-    """Obtiene una ruta funcional solo cuando está sustentada por el caso generado.
-
-    No inventa rutas. Primero usa campos explícitos del caso y, si no existen,
-    intenta recuperar una línea Ruta:/Navegación: ya producida por el modelo.
-    """
-    for key in (
-        "Route", "Ruta", "Functional Route", "Ruta funcional",
-        "Navigation", "Navegación", "Menu Path", "Ruta de navegación",
-    ):
-        value = _remove_trailing_pipe(tc.get(key))
-        if value:
-            return re.sub(r"^\s*(Ruta|Ruta funcional|Navegación|Navigation)\s*:\s*", "", value, flags=re.I).strip()
-
-    text = safe_text(description).replace("\r\n", "\n").replace("\r", "\n")
-    match = re.search(
-        r"(?mi)^\s*(?:\*\*\s*)?(?:Ruta|Ruta funcional|Navegación|Navigation)\s*:\s*(.+?)\s*$",
-        text,
-    )
-    if match:
-        return match.group(1).strip().strip("*")
-    return ""
-
-
-def build_azure_description(product, module, description, expected, preconditions, related_use_case, route=""):
+def build_azure_description(product, module, description, expected, preconditions, related_use_case):
     """Construye la estructura aprobada de Description para Azure sin inventar datos."""
     product = _remove_trailing_pipe(product)
     module = _remove_trailing_pipe(module)
@@ -1115,23 +1089,13 @@ def build_azure_description(product, module, description, expected, precondition
     expected = _remove_trailing_pipe(expected)
     preconditions = _remove_trailing_pipe(preconditions)
     related_use_case = _remove_trailing_pipe(related_use_case)
-    route = _remove_trailing_pipe(route)
 
     desc = re.sub(r"(?mi)^\s*Descripción:\s*", "", desc, count=1).strip()
-    desc = re.sub(r"(?mi)^\s*(?:\*\*\s*)?(?:Ruta|Ruta funcional|Navegación|Navigation)\s*:\s*.*?$\n?", "", desc).strip()
-
-    if route:
-        desc_block = f"Ruta funcional: {route}\n\n{desc or 'Pendiente'}"
-        expected_block = f"Ruta funcional: {route}\n\n{expected or 'Pendiente'}"
-    else:
-        desc_block = desc or "Pendiente"
-        expected_block = expected or "Pendiente"
-
     return (
         f"Producto: {product or 'Pendiente'}\n\n"
         f"Módulo: {module or 'Pendiente'}\n\n"
-        f"Descripción: {desc_block}\n\n"
-        f"Resultado esperado de la prueba: {expected_block}\n\n"
+        f"Descripción: {desc or 'Pendiente'}\n\n"
+        f"Resultado esperado de la prueba: {expected or 'Pendiente'}\n\n"
         f"Precondiciones: {preconditions or 'Pendiente'}\n\n"
         f"Caso de uso relacionado: {related_use_case or 'Pendiente'}"
     )
@@ -1201,18 +1165,18 @@ def module_token(module, title="", scenario=""):
 
 def build_case_title(tc, case_id):
     """
-    Construye el texto funcional del título eliminando IDs/prefijos duplicados.
-    El ID definitivo se agrega una sola vez mediante full_case_title().
+    V12: garantiza que Title sea un título funcional y no el CP ID.
+    Prioridad:
+      1) Title generado por el modelo si no es solo el ID.
+      2) Scenario
+      3) Description
+      4) Related Use Case
+      5) fallback controlado.
     """
     raw_title = safe_text(tc.get("Title"))
     normalized_title = re.sub(r"\s+", " ", raw_title).strip()
 
-    cp_pattern = r"^CP-AC[A-Z0-9_-]+-\d{5}\s*[-:–—]?\s*"
-    while re.match(cp_pattern, normalized_title, flags=re.I):
-        normalized_title = re.sub(
-            cp_pattern, "", normalized_title, count=1, flags=re.I
-        ).strip()
-
+    # Un título igual al ID no es un título funcional.
     if (
         not normalized_title
         or normalized_title.upper() == case_id.upper()
@@ -1223,71 +1187,22 @@ def build_case_title(tc, case_id):
             safe_text(tc.get("Description")),
             safe_text(tc.get("Related Use Case")),
         ]
+
         for candidate in candidates:
             candidate = re.sub(r"\s+", " ", candidate).strip()
-            candidate = re.sub(
-                cp_pattern, "", candidate, count=1, flags=re.I
-            ).strip()
-            if candidate and not re.fullmatch(
-                r"CP-[A-Z0-9_-]+-\d{5}", candidate.upper()
-            ):
+            if candidate and candidate.upper() != case_id.upper():
                 normalized_title = candidate
                 break
 
-    return normalized_title or f"Caso de prueba {case_id}"
+    if not normalized_title:
+        normalized_title = f"Caso de prueba {case_id}"
 
-
-def full_case_title(tc, case_id):
-    """Título final: exactamente un ID funcional + un espacio + título descriptivo."""
-    base = build_case_title(tc, case_id)
-    base = re.sub(
-        rf"^(?:{re.escape(case_id)}\s*)+",
-        "",
-        base,
-        flags=re.I,
-    ).strip()
-    return f"{case_id} {base}".strip()
-
-
-
-def suite_token(suite_name):
-    """Obtiene las iniciales de la Suite para el identificador funcional CP-ACXX-00001."""
-    raw = safe_text(suite_name).strip()
-    raw = re.sub(r"(?i)^\s*suite\s+", "", raw)
-    raw = re.sub(r"[^A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]+", " ", raw).strip()
-    words = [w for w in raw.split() if w]
-    if not words:
-        return "GG"
-    if len(words) == 1:
-        token = re.sub(r"[^A-Za-z0-9]", "", words[0]).upper()
-        return (token[:2] or "GG")
-    token = "".join(re.sub(r"[^A-Za-z0-9]", "", w)[0] for w in words if re.sub(r"[^A-Za-z0-9]", "", w))
-    return (token[:8] or "GG").upper()
-
-
-def build_suite_case_id(suite_name, index):
-    """Genera CP-AC + iniciales de Suite + consecutivo reiniciado en 00001."""
-    return f"CP-AC{suite_token(suite_name)}-{int(index):05d}"
-
-
-def assign_suite_case_ids(cases, suite_name):
-    """Asigna IDs únicos y consecutivos dentro de la Suite actual, empezando en 00001."""
-    used = set()
-    for index, tc in enumerate(cases or [], start=1):
-        candidate_index = index
-        while True:
-            cp_id = build_suite_case_id(suite_name, candidate_index)
-            if cp_id not in used:
-                break
-            candidate_index += 1
-        tc["ID"] = cp_id
-        used.add(cp_id)
-    return cases
+    return normalized_title
 
 
 def normalize_case_id(raw_id, module, index, prefix="CP-AC-"):
     candidate = safe_text(raw_id)
-    if re.fullmatch(r"CP-AC[A-Za-z0-9_-]+-\d{5}", candidate, flags=re.I):
+    if re.fullmatch(r"CP-AC-[A-Za-z0-9_-]+-\d{5}", candidate):
         return candidate
     return f"{prefix}{module_token(module)}-{index:05d}"
 
@@ -1563,32 +1478,6 @@ completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
 - No inventar contenido para completar Producto, Módulo, Resultado esperado, Precondiciones o Caso de uso relacionado. Si un dato no está definido en la fuente, indicarlo como pendiente/por validar según las reglas de no invención.
 - La Description debe poder pegarse/importarse directamente en el campo Description de Azure DevOps y conservar saltos de línea, listas y jerarquía funcional cuando sea posible.
 
-2B. RUTA FUNCIONAL Y FORMATO DE REDACCIÓN
-- Cuando la HU/CU o el CP de referencia permitan identificar la navegación funcional,
-  el campo Route debe contener una ruta descriptiva y legible, por ejemplo:
-  "Colectivos Autos > Reportes > Colfleet".
-- La ruta debe reflejar únicamente opciones, menús, módulos o pantallas sustentados
-  por la fuente o por el CP de referencia cuando corresponda al mismo flujo funcional.
-- La ruta debe aparecer en la Description y en el Resultado esperado cuando esté disponible.
-- Mantener una línea en blanco entre bloques y párrafos.
-- Cuando la fuente contenga listas de validaciones, campos, reglas, condiciones o escenarios,
-  usar viñetas para mejorar la lectura. No convertir cada viñeta en un CP si pertenece al mismo
-  escenario.
-
-2C. CASOS DIFERENCIADOS POR TIPO DE COTIZACIÓN
-- Si un CU contiene reglas funcionales explícitas diferenciadas para cotizaciones NUEVAS y
-  RENOVACIONES, genera CP independientes para cada tipo cuando la validación lo requiera.
-- Para una HU/CU extensa de generación de un reporte donde los campos indiquen "aplica para
-  nuevas" y/o "aplica para renovaciones", distribuir la cobertura en escenarios funcionales
-  coherentes, sin perder ningún campo.
-- Si la fuente exige validar ambos tipos y además existen reglas transversales del archivo,
-  puede generarse un tercer CP complementario/integral para cubrir generación, estructura,
-  orden, nombre, filtros y/o campos comunes que no queden completamente cubiertos en los CP
-  de Nuevas y Renovaciones.
-- El objetivo es cubrir todos los campos y reglas de la fuente evitando duplicación innecesaria.
-- No dividir artificialmente un CU solo por cantidad de campos; la división debe estar justificada
-  por una diferencia funcional real o por la necesidad de asegurar cobertura completa.
-
 3. PASOS COMPLETOS Y EJECUTABLES
 - Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
 - Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
@@ -1669,7 +1558,6 @@ def generate_qa_data(
     temperature=0.1,
     max_retries=2,
     initial_wait=10,
-    reference_case=None,
 ):
     if genai is None:
         raise RuntimeError("No está instalada la librería google-genai.")
@@ -1686,30 +1574,10 @@ def generate_qa_data(
             "\n...[DOCUMENTO EXCEDE EL LÍMITE DE SEGURIDAD; PRIORIZAR LOS CU Y SU CONTEXTO FUNCIONAL]"
         )
 
-    reference_addendum = ""
-    if reference_case:
-        ref_steps = reference_case.get("steps") or []
-        reference_addendum = (
-            "\n\n==================== CP DE REFERENCIA DE LA SUITE ====================\n"
-            "El siguiente Test Case fue consultado desde la Suite seleccionada y es la BASE OBLIGATORIA DE ESTRUCTURA para construir los nuevos CP. "
-            "Debes tomar de este CP el nivel de profundidad, organización, estilo de redacción, forma de separar Producto/Módulo/Descripción/Resultado esperado/Precondiciones/Caso de uso/Steps y el patrón de detalle funcional. "
-            "NO debes copiar sus reglas funcionales si no están sustentadas por la nueva HU/CU. La nueva HU/CU sigue siendo la única fuente de verdad funcional. "
-            "Usa el CP de referencia como plantilla de estructura y calidad, no como fuente de requisitos. "
-            "Conserva la ruta funcional del nuevo escenario únicamente cuando esté sustentada por la nueva fuente. "
-            "La Description del nuevo CP debe mencionar una ruta funcional descriptiva y el Resultado esperado también debe mencionar la ruta, siempre que la fuente o el CP de referencia la sustenten. "
-            "Si el nuevo escenario pertenece a la misma funcionalidad del CP de referencia, conserva la ruta funcional de referencia solo cuando sea coherente con la nueva HU/CU; no inventes segmentos adicionales. "
-            f"\nID referencia: {safe_text(reference_case.get('id'), 'SIN ID')}"
-            f"\nTítulo referencia: {safe_text(reference_case.get('title'), 'Sin título')}"
-            f"\nDescripción referencia:\n{safe_text(reference_case.get('description'), 'Sin descripción')}"
-            f"\nPrecondiciones referencia:\n{safe_text(reference_case.get('preconditions'), 'Sin precondiciones')}"
-            f"\nSteps referencia:\n{json.dumps(ref_steps, ensure_ascii=False)}"
-        )
-
     full_prompt = (
         prompt_text
         + "\n\n==================== ADDENDUM OBLIGATORIO DE CALIDAD ====================\n"
         + DETAILED_QA_ADDENDUM
-        + reference_addendum
         + "\n\n==================== FUENTE PROPORCIONADA POR EL USUARIO ====================\n"
         + source_content
         + "\n\n==================== REGLA DE PRIORIDAD ====================\n"
@@ -1717,8 +1585,6 @@ def generate_qa_data(
         "Usa el CU completo como fuente principal del CP y conserva sus detalles. "
         "Debe existir mínimo un CP por cada CU y cada CP debe corresponder a un solo CU. "
         "No conviertas Steps en CP. "
-        "Cuando el escenario tenga una ruta funcional sustentada, devuelve también el campo Route "
-        "con la ruta descriptiva, sin prefijos de CP ni texto adicional. "
         "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
         "debe validarse contra los CU reales identificados en USE_CASES. "
         "Para determinar Related Use Case aplica esta prioridad estricta: 1) buscar el CU en la Historia de Usuario/documentación; "
@@ -1873,13 +1739,15 @@ def create_excel(data, config_key):
         case_id = normalize_case_id(
             tc.get("ID"), module, idx, config["title_prefix"]
         )
-        title = full_case_title(tc, case_id)
+        title_base = build_case_title(tc, case_id)
+
+        # Conservamos nuestro identificador funcional en el título.
+        title = f"{case_id} - {title_base}" if not title_base.startswith(case_id) else title_base
 
         # Description siempre se exporta con la estructura completa aprobada.
         raw_description = safe_text(tc.get("Description"), safe_text(tc.get("Scenario")))
         preconditions = safe_text(tc.get("Preconditions"))
         scenario = safe_text(tc.get("Scenario"), raw_description)
-        route = get_case_route(tc, raw_description)
         description = format_description_for_azure(
             build_azure_description(
                 product=safe_text(safe_text(tc.get("Product"), data.get("PRODUCT")), "Pendiente"),
@@ -1887,8 +1755,7 @@ def create_excel(data, config_key):
                 description=raw_description,
                 expected=safe_text(safe_text(safe_text(tc.get("Expected Result"), tc.get("ExpectedResult")), tc.get("Resultado esperado de la prueba")), "Pendiente"),
                 preconditions=preconditions or "Pendiente",
-                related_use_case=safe_text(safe_text(safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase")), tc.get("Caso de uso relacionado")), "Pendiente"),
-                route=route,
+                related_use_case=safe_text(safe_text(safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase")), tc.get("Caso de uso relacionado")), "Pendiente")
             )
         )
         steps = safe_steps(tc)
@@ -2282,7 +2149,7 @@ def create_pdf(data, config_key, source_name=""):
     # ========================================================
     for idx, tc in enumerate(cases, start=1):
         case_id = safe_text(tc.get("ID"), f"CP-{idx:05d}")
-        title_value = full_case_title(tc, case_id)
+        title_value = build_case_title(tc, case_id)
 
         story.append(
             Paragraph(
@@ -2474,7 +2341,7 @@ def _build_reference_preview_case(reference_detail, generated_case):
 
     return {
         "ID": safe_text(tc.get("ID")),
-        "Title": full_case_title(tc, safe_text(tc.get("ID"), "CP-PREVIEW")),
+        "Title": build_case_title(tc, safe_text(tc.get("ID"), "CP-PREVIEW")),
         "Product": product,
         "Module": module,
         "Description": description_structured,
@@ -2511,7 +2378,6 @@ for _key, _default in {
     "azure_reference_plan_id": None,
     "azure_reference_suites": [],
     "azure_reference_suite_id": None,
-    "azure_reference_suite_name": "",
     "azure_reference_cases": [],
     "azure_reference_case_id": None,
     "azure_reference_detail": None,
@@ -2609,7 +2475,6 @@ with st.sidebar:
             st.session_state.azure_reference_plan_id = None
             st.session_state.azure_reference_suites = []
             st.session_state.azure_reference_suite_id = None
-            st.session_state.azure_reference_suite_name = ""
             st.session_state.azure_reference_cases = []
             st.session_state.azure_reference_case_id = None
             st.session_state.azure_reference_detail = None
@@ -2670,7 +2535,7 @@ with st.sidebar:
         delete_options = []
         for idx, tc in enumerate(delete_cases):
             delete_id = safe_text(tc.get("ID"), f"CASO-{idx + 1:05d}")
-            delete_title = full_case_title(tc, delete_id)
+            delete_title = build_case_title(tc, delete_id)
             delete_options.append(f"{delete_id} — {delete_title[:100]}")
 
         delete_label = st.selectbox(
@@ -2726,10 +2591,7 @@ with st.sidebar:
             suite_options,
             key="azure_reference_suite_select",
         )
-        selected_suite = suites[suite_options.index(selected_suite_label)]
-        selected_suite_id = selected_suite.get("id")
-        selected_suite_name = _ui_text(selected_suite.get("name"), "Suite")
-        st.session_state.azure_reference_suite_name = selected_suite_name
+        selected_suite_id = suites[suite_options.index(selected_suite_label)].get("id")
 
         if st.button("🔎 Consultar Test Cases", key="azure_reference_get_cases"):
             try:
@@ -2964,13 +2826,6 @@ if st.button(
         with st.spinner(
             "Analizando documentación y generando casos..."
         ):
-            reference_detail_for_generation = st.session_state.get("azure_reference_detail")
-            if not reference_detail_for_generation:
-                raise RuntimeError(
-                    "Debes consultar y seleccionar un Test Case de la Suite antes de generar. "
-                    "Ese CP será utilizado como base estructural para construir los nuevos CP."
-                )
-
             result = generate_qa_data(
                 load_prompt(),
                 source_text,
@@ -2979,7 +2834,6 @@ if st.button(
                 0.0,
                 int(max_retries),
                 int(wait_time),
-                reference_case=reference_detail_for_generation,
             )
 
         # Regla obligatoria: validar cobertura antes de exportar.
@@ -3003,26 +2857,6 @@ if st.button(
 
 
 result = st.session_state.result_json
-
-if result:
-    current_suite_name = safe_text(
-        st.session_state.get("azure_reference_suite_name"),
-        "Suite",
-    )
-    assign_suite_case_ids(result.get("TEST_CASES", []), current_suite_name)
-
-    # Normalización final: un solo ID por título y consecutivo único por Suite.
-    for tc in result.get("TEST_CASES", []):
-        cp_id = safe_text(tc.get("ID"))
-        tc["Title"] = full_case_title(tc, cp_id)
-
-    # Mantener Excel/PDF sincronizados con los mismos IDs y títulos del preview.
-    st.session_state.excel_data = create_excel(result, selected_config)
-    st.session_state.pdf_data = create_pdf(
-        result,
-        selected_config,
-        st.session_state.get("source_name", ""),
-    )
 
 if result:
     st.divider()
@@ -3067,7 +2901,7 @@ if result:
     case_options = []
     for idx, tc in enumerate(result.get("TEST_CASES", [])):
         case_id = safe_text(tc.get("ID"), f"CASO-{idx + 1:05d}")
-        case_title = full_case_title(tc, case_id)
+        case_title = build_case_title(tc, case_id)
         case_options.append(f"{case_id} — {case_title[:100]}")
 
     if case_options:
@@ -3143,10 +2977,17 @@ if result:
     preview_rows = []
 
     for tc in result["TEST_CASES"]:
-        cp_id = safe_text(tc.get("ID"))
         preview_rows.append({
-            "ID": cp_id,
-            "Title": full_case_title(tc, cp_id),
+            "ID": safe_text(tc.get("ID")),
+            "Title": build_case_title(
+                tc,
+                normalize_case_id(
+                    tc.get("ID"),
+                    safe_text(tc.get("Module"), "GENERAL"),
+                    len(preview_rows) + 1,
+                    EXCEL_CONFIGS[selected_config]["title_prefix"],
+                ),
+            ),
             "Module": safe_text(tc.get("Module")),
             "Scenario Type": safe_text(tc.get("Scenario Type")),
             "Steps": len(safe_steps(tc)),
@@ -3185,7 +3026,7 @@ if result:
             chosen = st.selectbox(
                 "CP a cargar",
                 labels,
-                format_func=lambda x: f"{x} — {full_case_title(publish_case_map[x], x)[:100]}",
+                format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
                 key="azure_publish_single_case",
             )
             selected_publish_ids = [chosen]
@@ -3193,7 +3034,7 @@ if result:
         selected_publish_ids = st.multiselect(
             "Selecciona los CP que deseas cargar",
             labels,
-            format_func=lambda x: f"{x} — {full_case_title(publish_case_map[x], x)[:100]}",
+            format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
             key="azure_publish_multi_cases",
         )
     else:
@@ -3271,7 +3112,7 @@ if result:
                     for row in existing
                 }
                 for cp_id in selected_publish_ids:
-                    title = full_case_title(publish_case_map[cp_id], cp_id)
+                    title = build_case_title(publish_case_map[cp_id], cp_id)
                     if re.sub(r"\s+", " ", title).strip().casefold() in existing_titles:
                         duplicate_titles.append(cp_id)
             except Exception as exc:
@@ -3314,7 +3155,7 @@ if result:
                 tc = publish_case_map[cp_id]
                 review_rows.append({
                     "CP": cp_id,
-                    "Título": full_case_title(tc, cp_id),
+                    "Título": build_case_title(tc, cp_id),
                     "Caso de Uso": safe_text(tc.get("Related Use Case"), "Pendiente"),
                     "Steps": len(safe_steps(tc)),
                 })
