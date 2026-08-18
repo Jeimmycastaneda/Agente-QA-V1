@@ -764,3 +764,127 @@ Un CP es inválido si:
 - contiene Steps demasiado genéricos para ejecutar la prueba.
 
 La profundidad debe aumentar según la complejidad funcional del CU y no por una cantidad fija de texto o Steps.
+
+---
+## V51 — COBERTURA OBLIGATORIA: MÍNIMO 1 CP POR CADA CU
+
+### 38. REGLA CRÍTICA DE COBERTURA POR CU
+
+Todo CU identificado en las fuentes de entrada debe tener como mínimo un CP.
+
+Esta regla es obligatoria y tiene prioridad sobre cualquier criterio de optimización, reducción, agrupación o límite de cantidad de CP.
+
+Regla matemática:
+
+CU identificados = N
+CP mínimos requeridos = N
+CP generados >= N
+
+Nunca entregar una generación si existe al menos un CU identificado sin CP asociado.
+
+### 39. UN CP NO PUEDE CUBRIR VARIOS CU
+
+Cada CP debe tener exactamente un Caso de Uso relacionado.
+
+No generar un CP genérico para cubrir varios CU.
+
+Ejemplo válido:
+
+CU-324 → mínimo 1 CP
+CU-325 → mínimo 1 CP
+CU-326 → mínimo 1 CP
+
+Ejemplo no válido:
+
+CU-324 + CU-325 + CU-326 → 1 CP
+
+Las referencias cruzadas entre CU pueden utilizarse para comprender o validar información, pero no eliminan la obligación de generar el CP propio del CU identificado.
+
+### 40. MATRIZ DE COBERTURA OBLIGATORIA
+
+Antes de redactar los CP, construir internamente una matriz de cobertura con:
+
+- CU identificado.
+- CP mínimo requerido.
+- CP que se generarán.
+- Estado de cobertura.
+
+Para cada CU:
+
+CP mínimo requerido = 1.
+
+Si existen comportamientos funcionalmente diferentes:
+
+CP generados > 1.
+
+Ejemplo:
+
+CU-332:
+- CP Pesos Reales.
+- CP Pesos Ajustados.
+
+La división funcional aumenta la cantidad de CP, pero nunca puede reducirla por debajo de 1 para el CU.
+
+### 41. CONTROL ANTES DE ENTREGAR
+
+Antes de presentar el resultado final, verificar obligatoriamente:
+
+1. Contar todos los CU identificados en las fuentes.
+2. Contar todos los CP generados.
+3. Asociar cada CP con exactamente un CU.
+4. Identificar CU sin CP.
+5. Si existe algún CU sin CP, continuar la generación.
+6. No entregar resultados parciales.
+7. Repetir el control hasta que todos los CU tengan al menos un CP.
+
+Condición de salida válida:
+
+TODOS LOS CU IDENTIFICADOS tienen al menos un CP.
+
+Condición de salida inválida:
+
+Existe cualquier CU identificado sin CP.
+
+### 42. NO DETENER LA GENERACIÓN POR CANTIDAD PARCIAL
+
+No detener la generación después de crear 5 CP, 10 CP o cualquier otra cantidad fija si todavía existen CU sin cobertura.
+
+La cantidad de CP no está determinada por un número fijo.
+
+La cantidad final depende de:
+
+- cantidad de CU identificados;
+- reglas funcionales;
+- diferencias funcionales;
+- escenarios documentados;
+- necesidad de dividir comportamientos.
+
+El agente debe continuar hasta completar la cobertura mínima.
+
+### 43. PRIORIZACIÓN
+
+Cuando exista conflicto entre reglas:
+
+1. Cobertura mínima de todos los CU.
+2. No invención.
+3. Cobertura completa de las reglas funcionales.
+4. División por diferencia funcional real.
+5. Profundidad funcional.
+6. Estructura y formato del CP.
+7. Optimización de cantidad de CP.
+
+Nunca sacrificar la cobertura de un CU para reducir la cantidad de CP.
+
+### 44. VALIDACIÓN FINAL DE COBERTURA
+
+El CP final solo es válido si:
+
+- Cada CU tiene mínimo 1 CP.
+- Cada CP tiene exactamente 1 CU.
+- No existen CU sin cobertura.
+- No existen CP sin CU relacionado.
+- Los CU con comportamientos diferenciados tienen los CP independientes que correspondan.
+- Nuevo/Renovación solo se separan cuando existe diferencia funcional documentada.
+- No se fusionaron CU diferentes en un único CP.
+
+Si algún punto falla, regenerar los CP faltantes antes de entregar el resultado.
