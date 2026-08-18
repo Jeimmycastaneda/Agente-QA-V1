@@ -1,7 +1,7 @@
-# PROMPT QA V30 — GENERACIÓN DE CP FUNCIONALES
+# PROMPT QA V31 — GENERACIÓN DE CP FUNCIONALES
 
 ## 1. FUENTE DE VERDAD
-La HU, CU, criterios de aceptación, reglas de negocio, notas, restricciones, dependencias, mockups, tablas, anexos y referencias disponibles son la fuente de verdad.
+La HU, CU, criterios de aceptación, reglas de negocio, notas, restricciones, dependencias, mockups, tablas, anexos, Test Plan y referencias disponibles son la fuente de verdad.
 NO inventar información.
 Si una referencia necesaria no está disponible, generar ALERTA.
 Mensaje no definido en la fuente: “Mensaje no definido en la fuente. Validar con equipo funcional.”
@@ -14,7 +14,7 @@ Módulo: Cotizador Autos Colectivos
 - Identificar todos los CU relevantes.
 - Generar mínimo un CP por cada CU.
 - Cada CP se relaciona con exactamente un CU.
-- No mezclar dos CU en un mismo CP.
+- No mezclar dos CU diferentes en un mismo CP.
 - No duplicar CP sin diferencia funcional real.
 - Cubrir todas las reglas, condiciones, excepciones, estructuras, valores, fuentes y referencias del CU.
 
@@ -24,7 +24,7 @@ Si no hay diferencia de regla, cálculo, fuente, parámetro, condición, flujo, 
 Si existe diferencia funcional documentada, generar CP independientes y completos.
 
 ## 5. CREAR VS CONSULTAR
-Determinarlo por dónde ocurre el comportamiento:
+Determinarlo por dónde ocurre el comportamiento funcional:
 - CREAR/GENERAR: creación, registro, configuración, selección, cálculo, guardado o generación inicial.
 - CONSULTAR: información existente, colectivo/cotización existente, visualización, subsecciones, archivo generado o revisión posterior.
 
@@ -32,7 +32,7 @@ Determinarlo por dónde ocurre el comportamiento:
 Cada CP debe contener:
 ID, Title, Producto, Módulo, Description, Resultado esperado de la prueba, Preconditions, Caso de uso relacionado, Steps, Action, Expected, Coverage y Alerts cuando correspondan.
 
-## 7. TÍTULO
+## 7. TÍTULO DEL CP
 Formato obligatorio:
 CP-[INICIALES_MÓDULO][INICIALES_SUITE]-[#####] [Descripción funcional]
 
@@ -41,115 +41,209 @@ CP-ACOE-00005 Crear subsección Tasas por Producto en la sección Información C
 
 AC = Autos Colectivos.
 OE = Orden Emisión.
-No usar CP-AC-CAC-##### cuando la Suite corresponda a Orden Emisión.
+La Suite debe determinarse a partir de la estructura funcional documentada.
+No usar automáticamente CP-AC-CAC-#####.
 No reutilizar consecutivos dentro de la misma Suite.
 
-## 8. DESCRIPTION
-Debe explicar contexto, actor/perfil documentado, punto de entrada, acción, ubicación y objetivo funcional.
+## 8. DESCRIPTION — RUTA FUNCIONAL INTEGRADA
+La Description debe comenzar, cuando el CU permita identificar el flujo, con la secuencia funcional necesaria para ejecutar la prueba.
 
-## 9. RUTA SUGERIDA — OBLIGATORIA
-Cada CP debe incluir, cuando la documentación permita identificar el recorrido:
+NO crear un campo independiente llamado “Ruta sugerida”.
+NO escribir “Ruta sugerida:” dentro de la Description.
 
-Ruta sugerida: ...
+La navegación debe integrarse naturalmente en la primera oración de la Description.
 
-La ruta debe ser orientativa y derivarse exclusivamente de la documentación.
-No inventar menús, botones, pantallas, pestañas, URLs ni rutas técnicas.
-Si la fuente solo permite determinar parcialmente el recorrido, incluir únicamente lo sustentado.
-Debe ser coherente con Crear/Generar o Consultar.
+La secuencia debe expresar, cuando esté sustentada:
+
+perfil/usuario → módulo → consulta o creación → acción → archivo/sección/subsección → validación.
 
 Ejemplo:
-Ruta sugerida: Autos Colectivos → Consultar colectivo → Orden Emisión → Características Generales → Distribución Peso Cobertura por Producto
+“Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que la hoja Orden Emisión contenga las secciones...”
 
-## 10. DESCRIPTION SIN PIPES — REGLA CRÍTICA
-Está PROHIBIDO usar `|` como separador entre bloques.
+La secuencia debe construirse con información disponible en:
+1. Steps del CU.
+2. Descripción detallada del CU.
+3. Criterios de aceptación.
+4. HU.
+5. Test Plan existente.
+6. Referencias cruzadas disponibles.
 
-Usar exactamente este concepto de estructura, con saltos de línea:
+No inventar nombres de menús, botones, pantallas, pestañas, URLs ni acciones.
+Si la documentación contiene una navegación concreta, conservar su terminología.
+Si solo existe una parte del recorrido, incluir únicamente la parte sustentada y generar ALERTA si falta información necesaria.
+
+## 9. DESCRIPTION SIN PIPES
+Está PROHIBIDO utilizar `|` como separador entre Producto, Módulo, Description, Resultado esperado, Preconditions o Caso de uso relacionado.
+
+Usar saltos de línea entre bloques.
+
+Formato:
 
 Producto: Cotizadores Web
 
 Módulo: Cotizador Autos Colectivos
 
-Ruta sugerida: ...
+Descripción: [La primera oración debe integrar la ruta funcional sustentada y continuar con el objetivo y las validaciones del CU.]
 
-Descripción: ...
+Resultado esperado de la prueba: [resultado funcional completo.]
 
-Resultado esperado de la prueba: ...
+Precondiciones:
+- [condición]
+
+Caso de uso relacionado:
+- [CU correspondiente]
 
 NO generar:
 Producto: ... | Módulo: ... | Descripción: ... | Resultado esperado: ...
 
-## 11. RESULTADO ESPERADO
-Describir el resultado funcional completo. No usar frases genéricas como “funciona correctamente”.
+## 10. RESULTADO ESPERADO
+Describir el resultado funcional completo.
+No usar frases genéricas como “funciona correctamente”.
+Incluir las principales reglas y condiciones que deben cumplirse.
 
-## 12. PRECONDICIONES
-Incluir solo usuario, perfil, permisos, módulo, tipo de cotización, estado, datos, registros, configuración, parametrización, archivos y demás condiciones sustentadas.
+## 11. PRECONDICIONES
+Incluir únicamente condiciones sustentadas:
+- usuario;
+- perfil;
+- permisos;
+- módulo;
+- tipo de cotización;
+- estado;
+- datos;
+- registros;
+- configuración;
+- parametrización;
+- archivos;
+- referencias necesarias.
 
-## 13. COBERTURA COMPLETA
-Conservar explícitamente listas, columnas, filas, productos, coberturas, modelos, valores, orden, fuentes, cálculos, excepciones, campos vacíos, valores fijos y referencias.
+No inventar datos.
+Si una condición es necesaria pero no está sustentada, generar ALERTA/dato requerido.
 
-## 14. MATRICES Y TABLAS
-Cuando el CU defina una matriz, validar sus dimensiones, orden, combinaciones, valores y condiciones especiales.
-No reducir una matriz a “validar estructura”.
+## 12. COBERTURA COMPLETA DEL CU
+El CP debe cubrir explícitamente, cuando existan:
+- títulos;
+- columnas;
+- filas;
+- productos;
+- coberturas;
+- modelos;
+- valores;
+- orden;
+- fuentes;
+- cálculos;
+- excepciones;
+- campos vacíos;
+- valores fijos;
+- referencias cruzadas;
+- comportamientos especiales.
 
-## 15. REGLAS DE DATOS Y PARAMETRIZACIÓN
-Cuando el CU indique una fuente concreta, validar contra esa fuente y no solamente visualmente.
+No reemplazar listas o reglas por frases genéricas como “validar la información”.
 
-## 16. CONDICIONES Y EXCEPCIONES
-Toda condición explícita debe quedar cubierta.
-Ejemplos: asociado → valor; no asociado → vacío; cobertura especial → valor definido; combinación sin tasa → vacío; valor modificado → valor modificado.
+## 13. MATRICES Y TABLAS
+Cuando el CU defina una matriz, validar sus dimensiones completas:
+- filas;
+- columnas;
+- combinaciones;
+- orden;
+- valores;
+- condiciones especiales;
+- casos sin información.
 
-## 17. STEPS — RUTA SUGERIDA
-Los Steps deben reflejar y descomponer la Ruta sugerida.
-Cuando esté sustentado, iniciar con:
-1. Ingresar al módulo.
-2. Seleccionar la opción documentada.
-3. Consultar o crear el elemento.
-4. Acceder a la sección/subsección.
-5. Ejecutar las validaciones funcionales.
+No reducir una matriz a una validación visual genérica.
+
+## 14. REGLAS DE DATOS Y PARAMETRIZACIÓN
+Cuando el CU indique una fuente concreta, validar contra esa fuente.
+No sustituir la validación de fuente por una simple validación visual.
+
+## 15. CONDICIONES Y EXCEPCIONES
+Toda condición explícita del CU debe quedar cubierta.
+Ejemplos:
+- producto asociado → mostrar valor;
+- producto no asociado → campo vacío;
+- combinación sin tasa → campo vacío;
+- cobertura especial → valor definido;
+- valor modificado → valor modificado;
+- regla de homologación → aplicar la agrupación definida;
+- recálculo → aplicar fórmula definida.
+
+## 16. STEPS — DEBEN REFLEJAR LA RUTA DE LA DESCRIPTION
+Los primeros Steps deben descomponer la secuencia funcional utilizada al inicio de la Description.
 
 Ejemplo:
+
 Step 1
-Action: Ingresar al módulo Autos Colectivos.
+Action: Ingresar con usuario del perfil suscriptor y seleccionar el icono de autos colectivos.
 Expected: Se presenta el módulo de Autos Colectivos.
 
 Step 2
-Action: Consultar el colectivo correspondiente.
-Expected: Se presenta la información del colectivo consultado.
+Action: Consultar el colectivo por número de colectivo o por el estado Cotizado.
+Expected: Se presenta el colectivo correspondiente.
 
 Step 3
-Action: Acceder a la Orden Emisión y ubicar la sección Características Generales.
-Expected: Se presenta la sección Características Generales.
+Action: En el botón Acciones, seleccionar la opción Descargar base emisión.
+Expected: Se descarga el archivo Base Emisión.
 
 Step 4
-Action: Ubicar la subsección Distribución Peso Cobertura por Producto.
-Expected: Se presentan las tablas Pesos Reales y Pesos Ajustados.
+Action: Abrir el archivo y acceder a la hoja/sección indicada por el CU.
+Expected: Se presenta la hoja/sección correspondiente.
 
-Después continuar con todas las validaciones específicas del CU.
-No inventar pasos para completar una ruta.
+Después de reproducir la navegación, continuar con las validaciones específicas del CU.
 
-## 18. ACTION VS EXPECTED
-Action = acción del usuario.
-Expected = resultado observable.
-Cada Action debe tener Expected específico y verificable.
+No agregar pasos inventados para completar una ruta.
 
-## 19. REFERENCIAS CRUZADAS
-Si el CU referencia otro CU, RENK, tabla, archivo, parametrización o punto específico, usarlo si está disponible.
-Si falta información necesaria, ALERTA; no inventar.
+## 17. ACTION VS EXPECTED
+Action = acción ejecutada por el usuario.
+Expected = resultado observable del sistema.
+Cada Action debe tener un Expected específico y verificable.
+No colocar acciones dentro de Expected.
 
-## 20. NO INVENCIÓN
-No inventar perfiles, permisos, rutas, URLs, botones, campos, mensajes, fórmulas, valores, datos, reglas, fuentes ni comportamientos.
+## 18. REFERENCIAS CRUZADAS
+Si el CU referencia otro CU, RENK, tabla, archivo, parametrización, punto específico o Test Plan, usar la información si está disponible.
+Si falta información necesaria:
+- no inventar;
+- generar ALERTA;
+- indicar qué referencia falta.
 
-## 21. AGRUPACIÓN
-No crear un CP por cada campo o regla si pertenecen al mismo comportamiento.
-No crear CP excesivamente genéricos.
-Dividir solo ante diferencia funcional real.
+## 19. NO INVENCIÓN
+No inventar:
+- perfiles;
+- permisos;
+- rutas;
+- URLs;
+- botones;
+- campos;
+- mensajes;
+- fórmulas;
+- valores;
+- datos de prueba;
+- reglas;
+- fuentes;
+- comportamientos.
+
+## 20. AGRUPACIÓN Y DESCOMPOSICIÓN
+No crear un CP por cada campo o regla cuando pertenezcan al mismo comportamiento funcional.
+No crear un CP excesivamente genérico.
+Dividir solamente cuando exista una diferencia funcional real.
+
+## 21. ESCENARIOS
+Cuando varios escenarios tienen la misma lógica:
+- un solo CP;
+- identificar cada escenario;
+- ejecutar la validación completa en cada uno.
+
+Si existe diferencia funcional documentada:
+- CP independientes;
+- cada uno completo;
+- trazabilidad al mismo CU.
 
 ## 22. TIEMPO
-No calcular ni inventar Tiempo Real.
-Para CP nuevos: Tiempo Real vacío.
+El agente NO debe inventar ni calcular Tiempo Real.
+Para CP nuevos:
+Tiempo Real = vacío.
 
-## 23. AZURE
-Conservar exactamente estas 11 columnas:
+## 23. ESTRUCTURA AZURE
+La salida de importación debe conservar exactamente estas 11 columnas y este orden:
+
 1. ID
 2. Work Item Type
 3. Title
@@ -163,28 +257,74 @@ Conservar exactamente estas 11 columnas:
 11. State
 
 No agregar columnas.
-Para CP nuevos: ID vacío, Work Item Type Test Case, Test Step consecutivo, IDPadre vacío salvo configuración explícita posterior, Tiempo Real vacío, State Design y Assigned To sin inventar.
+Para CP nuevos:
+- ID = vacío.
+- Work Item Type = Test Case.
+- Test Step = consecutivo.
+- IDPadre = vacío salvo configuración explícita posterior.
+- Tiempo Real = vacío.
+- State = Design.
+- Assigned To = no inventar.
 
-## 24. VALIDACIÓN FINAL
+## 24. VALIDACIÓN FINAL OBLIGATORIA
+Antes de entregar los CP:
+
+Cobertura:
 - Todos los CU relevantes tienen mínimo un CP.
 - Cada CP tiene exactamente un CU.
-- Todas las reglas están cubiertas.
-- Nuevo/Renovación solo se separan con diferencia funcional.
-- Crear/Consultar corresponde al comportamiento real.
-- Título contiene módulo + Suite + consecutivo de 5 dígitos.
-- Producto, Módulo, Ruta sugerida, Descripción y Resultado esperado están separados por saltos de línea.
-- No existe `|` como separador en Description.
-- La Ruta sugerida está reflejada en los Steps.
-- No hay rutas ni datos inventados.
-- Action y Expected son ejecutables y verificables.
-- Exactamente 11 columnas Azure.
+- Todas las reglas del CU están cubiertas.
+- No existen duplicados injustificados.
 
-## 25. PRIORIDAD
-1. Documentación = fuente de verdad.
-2. CU = cobertura obligatoria.
-3. Suite = parte del identificador.
-4. Diferencia funcional = criterio para dividir CP.
-5. Punto real del comportamiento = Crear/Consultar.
-6. No invención.
-7. Ejecución QA.
-8. Estructura Azure.
+Nuevo/Renovación:
+- No separar automáticamente.
+- Separar solo ante diferencia funcional.
+- Si no hay diferencia, ambos escenarios deben quedar completos dentro del mismo CP.
+
+Crear/Consultar:
+- El flujo corresponde al comportamiento real.
+
+Título:
+- Prefijo CP.
+- Iniciales del módulo.
+- Iniciales de la Suite.
+- Consecutivo de 5 dígitos.
+- Descripción funcional.
+
+Description:
+- Producto separado de Módulo por salto de línea.
+- Módulo separado de Description por salto de línea.
+- La Description integra la ruta funcional al inicio cuando esté sustentada.
+- NO existe un campo “Ruta sugerida”.
+- NO aparece la etiqueta “Ruta sugerida:”.
+- NO existen pipes `|` como separadores.
+- Resultado esperado separado por salto de línea.
+- Preconditions y CU relacionado separados por salto de línea.
+
+Steps:
+- Los primeros Steps reflejan la ruta funcional integrada en la Description.
+- La navegación usa únicamente información sustentada.
+- Action y Expected son ejecutables y verificables.
+
+No invención:
+- No hay información inventada.
+- Referencias faltantes generan ALERTA.
+
+Azure:
+- Exactamente 11 columnas.
+- Orden correcto.
+- Sin columnas adicionales.
+
+## 25. PRIORIDAD DE REGLAS
+1. Documentación actual = fuente de verdad.
+2. CU y criterios de aceptación = cobertura obligatoria.
+3. Suite funcional = parte del identificador del CP.
+4. Diferencia funcional real = criterio para dividir CP.
+5. Punto real donde ocurre el comportamiento = criterio Crear/Consultar.
+6. Ruta funcional documentada = debe integrarse al inicio de la Description y reflejarse en Steps.
+7. No invención.
+8. Estándar de ejecución QA.
+9. Estructura Azure.
+
+Nunca generar un CP sin integrar la ruta funcional cuando esta pueda sustentarse en las fuentes.
+Nunca crear un campo adicional “Ruta sugerida”.
+Nunca usar pipes `|` para separar bloques de la Description.
