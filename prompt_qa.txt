@@ -170,6 +170,90 @@ No generar pipes para compactar información, separar bloques, sustituir saltos 
 
 Si la fuente contiene un pipe como parte literal de un dato funcional, conservarlo únicamente cuando sea indispensable para representar literalmente la fuente; nunca usarlo como separador creado por el agente.
 
+
+## 9C. SALTOS DE LÍNEA REALES — PROHIBIDO ESCRIBIR `\n`
+
+Los saltos de línea de la Description deben ser saltos de línea REALES del texto.
+
+PROHIBIDO escribir literalmente los caracteres:
+`\n`
+
+No generar:
+Producto: Cotizadores Web\nMódulo: Cotizador Autos Colectivos\nDescripción: ...
+
+Debe generarse con saltos de línea reales:
+
+Producto: Cotizadores Web
+
+Módulo: Cotizador Autos Colectivos
+
+Descripción: ...
+
+La secuencia `\n` no debe aparecer visible en ningún campo del CP.
+
+Esta regla aplica a:
+- Description.
+- Resultado esperado de la prueba.
+- Precondiciones.
+- Caso de uso relacionado.
+- Steps, Action y Expected cuando corresponda.
+- Cualquier texto enviado al archivo o a Azure DevOps.
+
+Si el formato de salida se construye mediante JSON, Python, plantilla o estructura intermedia, los caracteres de escape deben convertirse en saltos de línea reales ANTES de presentar o guardar el CP.
+
+El resultado final visible para el usuario NO puede contener `\n`.
+
+## 9D. VALIDACIÓN DE FORMATO ANTES DE ENTREGAR
+
+Rechazar/regenerar el CP si se cumple cualquiera de estas condiciones:
+
+1. Aparece la cadena literal `\n`.
+2. Aparece un pipe `|` utilizado como separador.
+3. Producto y Módulo están en la misma línea.
+4. Módulo y Descripción están en la misma línea.
+5. Resultado esperado está pegado al cuerpo de la Description sin línea en blanco.
+6. Precondiciones están pegadas al Resultado esperado.
+7. Caso de uso relacionado está pegado a las Precondiciones.
+8. Las listas de la fuente fueron convertidas en un párrafo corrido.
+9. La primera oración de Description no contiene la ruta funcional sustentada cuando el CU/documentación la proporciona.
+
+La generación solo se considera válida cuando el texto final conserva saltos de línea REALES, espacios entre bloques, listas y la ruta funcional integrada.
+
+## 9E. EJEMPLO OBLIGATORIO DE FORMATO FINAL
+
+Producto: Cotizadores Web
+
+Módulo: Cotizador Autos Colectivos
+
+Descripción: Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que la hoja Orden Emisión contenga las secciones:
+
+- Información cuenta
+  i. Planes
+  ii. Límites y deducibles por producto - Cuenta
+  iii. Asistencias o Coberturas Adicionales por producto
+  iv. Tasas por producto
+  v. Primas mínimas por producto
+
+- Características generales
+  i. Distribución peso Cobertura por Producto
+  ii. Límites y deducibles por producto
+  iii. Primas Comerciales Coberturas Adicionales
+  iv. Tasas por producto
+  v. Primas mínimas por producto
+
+Resultado esperado de la prueba: La hoja Orden Emisión se genera con la estructura y subsecciones completas conforme a lo definido en el CU.
+
+Precondiciones:
+
+- Contar con usuario del perfil suscriptor oficina principal.
+- Contar con colectivo en estado cotizado.
+
+Caso de uso relacionado:
+
+- CU-326 - Generar Orden Emisión.
+
+Este ejemplo es estructural: adaptar el contenido funcional al CU real y a sus fuentes. No copiar información no sustentada.
+
 ## 10. RESULTADO ESPERADO
 Describir el resultado funcional completo.
 No usar frases genéricas como “funciona correctamente”.
@@ -371,6 +455,9 @@ Description:
 - NO existe un campo “Ruta sugerida”.
 - NO aparece la etiqueta “Ruta sugerida:”.
 - NO existen pipes `|` como separadores.
+- NO aparece la cadena literal `\n` en ningún campo.
+- Los saltos de línea son reales, no texto escapado.
+- Existe una línea en blanco entre los bloques principales.
 - Resultado esperado separado por salto de línea.
 - Preconditions y CU relacionado separados por salto de línea.
 
