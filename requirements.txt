@@ -1,7 +1,0 @@
-streamlit
-pandas
-openpyxl
-reportlab
-pypdf
-python-docx
-google-genai
