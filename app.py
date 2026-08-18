@@ -1856,98 +1856,249 @@ def generate_qa_data(
 def create_excel(data, config_key):
     """
     Genera:
-      1) Hoja 'Azure Import' con la estructura aprobada para Azure, agregando Tipo Origen Proyecto.
+
+      1) Hoja 'Azure Import' con la estructura aprobada para Azure.
       2) Hoja 'Matriz QA' conservando la estructura aprobada.
 
-    Importante:
-    - Para CP nuevos, ID queda vacío.
+    Reglas importantes:
+    - Los CP nuevos utilizan el formato CP-ACGG-#####.
+    - La numeración se reinicia en 00001 para la Suite/lote actual.
     - Cada CP es un bloque: una fila de cabecera seguida por sus pasos.
-    - En las filas de pasos se dejan vacíos los campos de cabecera, igual que en
-      el Excel exportado de Azure Test Plans usado como referencia.
-    - El ID funcional CP-AC-... se conserva dentro del Title, no en la columna ID.
+    - Las filas de pasos dejan vacíos los campos de cabecera.
+    - El ID funcional CP-ACGG-##### se conserva dentro del Title.
+    - El Title utiliza exactamente:
+          CP-ACGG-00001 Descripción
+    - No se agrega guion, dos puntos ni pipe entre ID y descripción.
     """
+
     config = EXCEL_CONFIGS[config_key]
     output = io.BytesIO()
 
     azure_rows = []
     matriz_rows = []
+
     cases = data.get("TEST_CASES", [])
 
-    for idx, tc in enumerate(cases, start=1):
-        module = safe_text(tc.get("Module"), "GENERAL")
-        case_id = normalize_case_id(
-            tc.get("ID"), module, idx, config["title_prefix"]
+    # ============================================================
+    # NUMERACIÓN DE CP POR SUITE
+    # ============================================================
+    # Cada generación corresponde a la Suite seleccionada.
+    # Por lo tanto, el primer CP siempre comienza en 00001.
+    suite_cp_index = 1
+
+    for tc in cases:
+
+        # ========================================================
+        # MÓDULO
+        # ========================================================
+        module = safe_text(
+            tc.get("Module"),
+            "GENERAL"
         )
-        title_base = build_case_title(tc, case_id)
 
-        # Conservamos nuestro identificador funcional en el título.
-        title = f"{case_id} - {title_base}" if not title_base.startswith(case_id) else title_base
+        # ========================================================
+        # ID FUNCIONAL DEL CP
+        # ========================================================
+        # IMPORTANTE:
+        # No reutilizamos tc["ID"] para evitar que una numeración
+        # anterior o una Suite anterior contamine la numeración.
+        #
+        # Cada exportación de una Suite comienza en 00001.
+        # ========================================================
+        case_id = f"CP-ACGG-{suite_cp_index:05d}"
 
-        # Description siempre se exporta con la estructura completa aprobada.
-        raw_description = safe_text(tc.get("Description"), safe_text(tc.get("Scenario")))
-        preconditions = safe_text(tc.get("Preconditions"))
-        scenario = safe_text(tc.get("Scenario"), raw_description)
+        # Mantener el ID actualizado en el caso original para que
+        # las siguientes etapas del flujo utilicen el mismo valor.
+        tc["ID"] = case_id
+
+        # ========================================================
+        # TÍTULO
+        # ========================================================
+        # build_case_title ya genera:
+        #
+        # CP-ACGG-00001 Descripción
+        #
+        # No agregamos "- " posteriormente.
+        # ========================================================
+        title = build_case_title(
+            tc,
+            case_id
+        )
+
+        tc["Title"] = title
+
+        # ========================================================
+        # DESCRIPTION
+        # ========================================================
+        raw_description = safe_text(
+            tc.get("Description"),
+            safe_text(tc.get("Scenario"))
+        )
+
+        preconditions = safe_text(
+            tc.get("Preconditions")
+        )
+
+        scenario = safe_text(
+            tc.get("Scenario"),
+            raw_description
+        )
+
         description = format_description_for_azure(
             build_azure_description(
-                product=safe_text(safe_text(tc.get("Product"), data.get("PRODUCT")), "Pendiente"),
+                product=safe_text(
+                    safe_text(
+                        tc.get("Product"),
+                        data.get("PRODUCT")
+                    ),
+                    "Pendiente"
+                ),
                 module=module or "Pendiente",
                 description=raw_description,
-                expected=safe_text(safe_text(safe_text(tc.get("Expected Result"), tc.get("ExpectedResult")), tc.get("Resultado esperado de la prueba")), "Pendiente"),
-                preconditions=preconditions or "Pendiente",
-                related_use_case=safe_text(safe_text(safe_text(tc.get("Related Use Case"), tc.get("RelatedUseCase")), tc.get("Caso de uso relacionado")), "Pendiente")
+                expected=safe_text(
+                    safe_text(
+                        safe_text(
+                            tc.get("Expected Result"),
+                            tc.get("ExpectedResult")
+                        ),
+                        tc.get(
+                            "Resultado esperado de la prueba"
+                        )
+                    ),
+                    "Pendiente"
+                ),
+                preconditions=(
+                    preconditions
+                    or "Pendiente"
+                ),
+                related_use_case=safe_text(
+                    safe_text(
+                        safe_text(
+                            tc.get("Related Use Case"),
+                            tc.get("RelatedUseCase")
+                        ),
+                        tc.get(
+                            "Caso de uso relacionado"
+                        )
+                    ),
+                    "Pendiente"
+                )
             )
         )
+
+        # ========================================================
+        # STEPS
+        # ========================================================
         steps = safe_steps(tc)
 
-        coverage = find_coverage(data, tc)
+        # ========================================================
+        # COBERTURA QA
+        # ========================================================
+        coverage = find_coverage(
+            data,
+            tc
+        )
 
         validation_method = normalize_validation_method(
             coverage.get(
                 "Validation Method",
-                tc.get("Validation Method", "Pendiente")
+                tc.get(
+                    "Validation Method",
+                    "Pendiente"
+                )
             )
         )
 
         coverage_value = normalize_coverage(
-            coverage.get("Coverage", tc.get("Coverage", "Pendiente"))
+            coverage.get(
+                "Coverage",
+                tc.get(
+                    "Coverage",
+                    "Pendiente"
+                )
+            )
         )
 
-        alerts = safe_text(coverage.get("Alerts")) or aggregate_case_alerts(data, tc)
+        # ========================================================
+        # ALERTAS
+        # ========================================================
+        alerts = (
+            safe_text(
+                coverage.get("Alerts")
+            )
+            or aggregate_case_alerts(
+                data,
+                tc
+            )
+        )
 
-        if alerts == "Sin Alertas" and data.get("ALERTS"):
+        if (
+            alerts == "Sin Alertas"
+            and data.get("ALERTS")
+        ):
             general_alerts = []
+
             for alert in data["ALERTS"]:
-                alert_name = safe_text(alert.get("Alert"))
-                reason = safe_text(alert.get("Reason"))
+
+                alert_name = safe_text(
+                    alert.get("Alert")
+                )
+
+                reason = safe_text(
+                    alert.get("Reason")
+                )
+
                 if alert_name:
                     general_alerts.append(
-                        f"{alert_name}: {reason}" if reason else alert_name
+                        f"{alert_name}: {reason}"
+                        if reason
+                        else alert_name
                     )
-            if general_alerts:
-                alerts = " | ".join(general_alerts)
 
-        # --------------------------------------------------------
-        # AZURE IMPORT — ESTRUCTURA DEL EXPORT DE AZURE TEST PLANS
-        # --------------------------------------------------------
-        # Un CP = una fila de cabecera + todas sus filas de pasos.
-        # La cabecera contiene ID/Work Item Type/Title y metadatos.
-        # Las filas siguientes contienen SOLO Test Step/Step Action/Step Expected.
-        # Esta estructura evita que Azure interprete cada paso como un nuevo CP.
-        area_path = "COTIZADORES WEB\\DESARROLLO"
-        assigned_to = safe_text(config.get("assigned_to"))
+            if general_alerts:
+                alerts = " | ".join(
+                    general_alerts
+                )
+
+        # ========================================================
+        # CONFIGURACIÓN AZURE
+        # ========================================================
+        area_path = (
+            "COTIZADORES WEB\\DESARROLLO"
+        )
+
+        assigned_to = safe_text(
+            config.get("assigned_to")
+        )
+
         state = "Design"
         work_item_type = "Test Case"
 
+        # ========================================================
+        # PASOS PARA EXPORTACIÓN
+        # ========================================================
         if not steps:
+
             steps_for_export = [{
                 "Step #": 1,
-                "Action": "Información insuficiente para definir el paso.",
-                "Expected value": "Validar con el equipo funcional antes de ejecutar.",
+                "Action": (
+                    "Información insuficiente "
+                    "para definir el paso."
+                ),
+                "Expected value": (
+                    "Validar con el equipo funcional "
+                    "antes de ejecutar."
+                ),
             }]
+
         else:
             steps_for_export = steps
 
-        # Fila cabecera: exactamente una por CP.
+        # ========================================================
+        # AZURE IMPORT — FILA CABECERA
+        # ========================================================
+        # Un CP = una fila de cabecera + sus pasos.
+        # ========================================================
         azure_rows.append({
             "ID": "",
             "Work Item Type": work_item_type,
@@ -1964,14 +2115,23 @@ def create_excel(data, config_key):
             "State": state,
         })
 
-        # Filas de pasos: solo Step/Action/Expected, igual al modelo exportado de Azure.
-        for step_index, step in enumerate(steps_for_export, start=1):
+        # ========================================================
+        # AZURE IMPORT — FILAS DE PASOS
+        # ========================================================
+        for step_index, step in enumerate(
+            steps_for_export,
+            start=1
+        ):
+
             azure_rows.append({
                 "ID": "",
                 "Work Item Type": "",
                 "Title": "",
                 "Description": "",
-                "Test Step": step.get("Step #", step_index),
+                "Test Step": step.get(
+                    "Step #",
+                    step_index
+                ),
                 "Step Action": safe_text(
                     step.get("Action"),
                     "Acción no definida",
@@ -1988,9 +2148,9 @@ def create_excel(data, config_key):
                 "State": "",
             })
 
-        # --------------------------------------------------------
-        # MATRIZ QA — se conserva sin cambios de columnas.
-        # --------------------------------------------------------
+        # ========================================================
+        # MATRIZ QA
+        # ========================================================
         matriz_rows.append({
             "TestCaseId": case_id,
             "Title": title,
@@ -2001,7 +2161,10 @@ def create_excel(data, config_key):
                 )
             ),
             "Criterion": safe_text(
-                coverage.get("Criterion", tc.get("Criterion"))
+                coverage.get(
+                    "Criterion",
+                    tc.get("Criterion")
+                )
             ),
             "Scenario": scenario,
             "Scenario Type": safe_text(
@@ -2019,38 +2182,86 @@ def create_excel(data, config_key):
             ),
         })
 
-    df_azure = pd.DataFrame(azure_rows, columns=AZURE_COLUMNS)
-    df_matriz = pd.DataFrame(matriz_rows, columns=MATRIZ_COLUMNS)
+        # ========================================================
+        # SIGUIENTE CP DE LA SUITE
+        # ========================================================
+        suite_cp_index += 1
 
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        # Hoja compatible con Azure DevOps Test Plans.
+    # ============================================================
+    # DATAFRAMES
+    # ============================================================
+    df_azure = pd.DataFrame(
+        azure_rows,
+        columns=AZURE_COLUMNS
+    )
+
+    df_matriz = pd.DataFrame(
+        matriz_rows,
+        columns=MATRIZ_COLUMNS
+    )
+
+    # ============================================================
+    # GENERAR EXCEL
+    # ============================================================
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        # --------------------------------------------------------
+        # AZURE IMPORT
+        # --------------------------------------------------------
         df_azure.to_excel(
             writer,
             sheet_name="Azure Import",
             index=False,
         )
 
-        # Matriz aprobada.
+        # --------------------------------------------------------
+        # MATRIZ QA
+        # --------------------------------------------------------
         df_matriz.to_excel(
             writer,
             sheet_name="Matriz QA",
             index=False,
         )
 
+        # --------------------------------------------------------
+        # FORMATO
+        # --------------------------------------------------------
         for ws in writer.book.worksheets:
+
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions
 
             for column_cells in ws.columns:
-                letter = column_cells[0].column_letter
-                max_len = max(
-                    len(str(cell.value or "")) for cell in column_cells
+
+                letter = (
+                    column_cells[0]
+                    .column_letter
                 )
-                ws.column_dimensions[letter].width = min(
-                    max(max_len + 2, 12), 60
+
+                max_len = max(
+                    len(
+                        str(
+                            cell.value or ""
+                        )
+                    )
+                    for cell in column_cells
+                )
+
+                ws.column_dimensions[
+                    letter
+                ].width = min(
+                    max(
+                        max_len + 2,
+                        12
+                    ),
+                    60
                 )
 
     output.seek(0)
+
     return output.getvalue()
 
 
@@ -2719,36 +2930,116 @@ with st.sidebar:
                 st.success(f"✅ {delete_case_id} eliminado.")
                 st.rerun()
 
-    suites = st.session_state.get("azure_reference_suites", [])
-    if suites:
-        suite_options = [
-            f"{_ui_text(s.get('id'), 'SIN ID')} — {_ui_text(s.get('name'), 'Suite sin nombre')}"
-            for s in suites
-        ]
-        selected_suite_label = st.selectbox(
-            "2️⃣ Suite",
-            suite_options,
-            key="azure_reference_suite_select",
-        )
-        selected_suite_id = suites[suite_options.index(selected_suite_label)].get("id")
+   suites = st.session_state.get("azure_reference_suites", [])
 
-        if st.button("🔎 Consultar Test Cases", key="azure_reference_get_cases"):
-            try:
-                plan_id_for_suite = st.session_state.get("azure_reference_plan_id") or selected_plan_id
-                with st.spinner("Consultando Test Cases de la Suite seleccionada..."):
-                    cases = list_test_cases(plan_id_for_suite, selected_suite_id)
-                st.session_state.azure_reference_suite_id = selected_suite_id
-                st.session_state.azure_reference_cases = cases
-                st.session_state.azure_reference_case_id = None
-                # Evita que Streamlit conserve la selección "None —" de una ejecución anterior.
-                st.session_state.pop("azure_reference_case_select", None)
-                st.session_state.azure_reference_detail = None
-                st.session_state.azure_reference_preview = None
-                st.success(f"✅ {len(cases)} Test Case(s) encontrados.")
-            except AzureDevOpsError as exc:
-                st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
-            except Exception as exc:
-                st.error(f"❌ Error inesperado al consultar Test Cases: {exc}")
+if suites:
+
+    suite_options = [
+        f"{_ui_text(s.get('id'), 'SIN ID')} — "
+        f"{_ui_text(s.get('name'), 'Suite sin nombre')}"
+        for s in suites
+    ]
+
+    selected_suite_label = st.selectbox(
+        "2️⃣ Suite",
+        suite_options,
+        key="azure_reference_suite_select",
+    )
+
+    selected_suite_index = suite_options.index(
+        selected_suite_label
+    )
+
+    selected_suite = suites[selected_suite_index]
+
+    selected_suite_id = selected_suite.get("id")
+    selected_suite_name = selected_suite.get("name")
+
+    # ------------------------------------------------------------
+    # GUARDAR SUITE SELECCIONADA
+    # ------------------------------------------------------------
+    # La numeración de los CP pertenece a la Suite seleccionada.
+    # El consecutivo se reinicia desde 00001 para cada Suite.
+    st.session_state.azure_reference_suite_id = selected_suite_id
+    st.session_state.azure_reference_suite_name = selected_suite_name
+
+    # Contador lógico de la Suite.
+    # IMPORTANTE:
+    # Este contador NO se utiliza para consultar Test Cases.
+    # Se utilizará posteriormente en la generación/exportación de CP.
+    st.session_state.azure_reference_suite_cp_counter = 1
+
+    # ------------------------------------------------------------
+    # CONSULTAR TEST CASES
+    # ------------------------------------------------------------
+    if st.button(
+        "🔎 Consultar Test Cases",
+        key="azure_reference_get_cases"
+    ):
+        try:
+
+            plan_id_for_suite = (
+                st.session_state.get("azure_reference_plan_id")
+                or selected_plan_id
+            )
+
+            with st.spinner(
+                "Consultando Test Cases de la Suite seleccionada..."
+            ):
+                cases = list_test_cases(
+                    plan_id_for_suite,
+                    selected_suite_id
+                )
+
+            # ----------------------------------------------------
+            # GUARDAR INFORMACIÓN DE LA SUITE
+            # ----------------------------------------------------
+            st.session_state.azure_reference_suite_id = (
+                selected_suite_id
+            )
+
+            st.session_state.azure_reference_suite_name = (
+                selected_suite_name
+            )
+
+            # ----------------------------------------------------
+            # REINICIAR CONTADOR DE CP
+            # ----------------------------------------------------
+            # Cada Suite comienza nuevamente en 00001.
+            st.session_state.azure_reference_suite_cp_counter = 1
+
+            # ----------------------------------------------------
+            # GUARDAR TEST CASES CONSULTADOS
+            # ----------------------------------------------------
+            st.session_state.azure_reference_cases = cases
+
+            st.session_state.azure_reference_case_id = None
+
+            # Evita que Streamlit conserve la selección
+            # "None —" de una ejecución anterior.
+            st.session_state.pop(
+                "azure_reference_case_select",
+                None
+            )
+
+            st.session_state.azure_reference_detail = None
+            st.session_state.azure_reference_preview = None
+
+            st.success(
+                f"✅ {len(cases)} Test Case(s) encontrados."
+            )
+
+        except AzureDevOpsError as exc:
+
+            st.error(
+                f"❌ No se pudieron consultar los Test Cases: {exc}"
+            )
+
+        except Exception as exc:
+
+            st.error(
+                f"❌ Error inesperado al consultar Test Cases: {exc}"
+            )
 
     cases = st.session_state.get("azure_reference_cases", [])
     st.markdown("### 3️⃣ Test Case de referencia")
@@ -3111,26 +3402,69 @@ if result:
         )
 
     # ========================================================
-    st.subheader("🧪 Casos generados")
+st.subheader("🧪 Casos generados")
 
-    preview_rows = []
+preview_rows = []
 
-    for tc in result["TEST_CASES"]:
-        preview_rows.append({
-            "ID": safe_text(tc.get("ID")),
-            "Title": build_case_title(
-                tc,
-                normalize_case_id(
-                    tc.get("ID"),
-                    safe_text(tc.get("Module"), "GENERAL"),
-                    len(preview_rows) + 1,
-                    EXCEL_CONFIGS[selected_config]["title_prefix"],
-                ),
-            ),
-            "Module": safe_text(tc.get("Module")),
-            "Scenario Type": safe_text(tc.get("Scenario Type")),
-            "Steps": len(safe_steps(tc)),
-        })
+# ============================================================
+# NUMERACIÓN DE CP POR SUITE
+# ============================================================
+# Cada Suite inicia nuevamente en 00001.
+# El contador corresponde únicamente a los CP generados
+# para la Suite actualmente seleccionada.
+suite_cp_index = 1
+
+for tc in result["TEST_CASES"]:
+
+    # ========================================================
+    # GENERAR ID DEL CP
+    # ========================================================
+    cp_id = normalize_case_id(
+        tc.get("ID"),
+        safe_text(
+            tc.get("Module"),
+            "GENERAL"
+        ),
+        suite_cp_index,
+        "CP-ACGG-",
+    )
+
+    # ========================================================
+    # GENERAR TÍTULO
+    # ========================================================
+    cp_title = build_case_title(
+        tc,
+        cp_id
+    )
+
+    # ========================================================
+    # CONSERVAR ID Y TÍTULO EN EL RESULTADO
+    # ========================================================
+    # Esto evita que la previsualización tenga un ID diferente
+    # al que posteriormente utilizará Excel/Azure.
+    tc["ID"] = cp_id
+    tc["Title"] = cp_title
+
+    # ========================================================
+    # AGREGAR A PREVISUALIZACIÓN
+    # ========================================================
+    preview_rows.append({
+        "ID": cp_id,
+        "Title": cp_title,
+        "Module": safe_text(
+            tc.get("Module")
+        ),
+        "Scenario Type": safe_text(
+            tc.get("Scenario Type")
+        ),
+        "Steps": len(
+            safe_steps(tc)
+        ),
+    })
+
+    # Siguiente CP de la Suite
+    suite_cp_index += 1
+
 
     st.dataframe(
         pd.DataFrame(preview_rows),
