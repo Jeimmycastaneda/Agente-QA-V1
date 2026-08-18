@@ -3394,69 +3394,63 @@ if result:
         )
 
     # ========================================================
-st.subheader("🧪 Casos generados")
+    st.subheader("🧪 Casos generados")
 
-preview_rows = []
-
-# ============================================================
-# NUMERACIÓN DE CP POR SUITE
-# ============================================================
-# Cada Suite inicia nuevamente en 00001.
-# El contador corresponde únicamente a los CP generados
-# para la Suite actualmente seleccionada.
-suite_cp_index = 1
-
-for tc in result["TEST_CASES"]:
+    preview_rows = []
 
     # ========================================================
-    # GENERAR ID DEL CP
+    # NUMERACIÓN DE CP POR SUITE
     # ========================================================
-    cp_id = normalize_case_id(
-        tc.get("ID"),
-        safe_text(
-            tc.get("Module"),
-            "GENERAL"
-        ),
-        suite_cp_index,
-        "CP-ACGG-",
-    )
+    # Cada Suite inicia nuevamente en 00001.
+    suite_cp_index = 1
 
-    # ========================================================
-    # GENERAR TÍTULO
-    # ========================================================
-    cp_title = build_case_title(
-        tc,
-        cp_id
-    )
+    for tc in result.get("TEST_CASES", []):
 
-    # ========================================================
-    # CONSERVAR ID Y TÍTULO EN EL RESULTADO
-    # ========================================================
-    # Esto evita que la previsualización tenga un ID diferente
-    # al que posteriormente utilizará Excel/Azure.
-    tc["ID"] = cp_id
-    tc["Title"] = cp_title
+        # ====================================================
+        # GENERAR ID DEL CP
+        # ====================================================
+        cp_id = normalize_case_id(
+            tc.get("ID"),
+            safe_text(
+                tc.get("Module"),
+                "GENERAL"
+            ),
+            suite_cp_index,
+            "CP-ACGG-",
+        )
 
-    # ========================================================
-    # AGREGAR A PREVISUALIZACIÓN
-    # ========================================================
-    preview_rows.append({
-        "ID": cp_id,
-        "Title": cp_title,
-        "Module": safe_text(
-            tc.get("Module")
-        ),
-        "Scenario Type": safe_text(
-            tc.get("Scenario Type")
-        ),
-        "Steps": len(
-            safe_steps(tc)
-        ),
-    })
+        # ====================================================
+        # GENERAR TÍTULO
+        # ====================================================
+        cp_title = build_case_title(
+            tc,
+            cp_id
+        )
 
-    # Siguiente CP de la Suite
-    suite_cp_index += 1
+        # ====================================================
+        # CONSERVAR ID Y TÍTULO
+        # ====================================================
+        tc["ID"] = cp_id
+        tc["Title"] = cp_title
 
+        # ====================================================
+        # PREVISUALIZACIÓN
+        # ====================================================
+        preview_rows.append({
+            "ID": cp_id,
+            "Title": cp_title,
+            "Module": safe_text(
+                tc.get("Module")
+            ),
+            "Scenario Type": safe_text(
+                tc.get("Scenario Type")
+            ),
+            "Steps": len(
+                safe_steps(tc)
+            ),
+        })
+
+        suite_cp_index += 1
 
     st.dataframe(
         pd.DataFrame(preview_rows),
