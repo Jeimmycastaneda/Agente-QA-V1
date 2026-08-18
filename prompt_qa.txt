@@ -1,4 +1,4 @@
-# PROMPT QA V31 — GENERACIÓN DE CP FUNCIONALES
+# PROMPT QA V32 — GENERACIÓN DE CP FUNCIONALES
 
 ## 1. FUENTE DE VERDAD
 La HU, CU, criterios de aceptación, reglas de negocio, notas, restricciones, dependencias, mockups, tablas, anexos, Test Plan y referencias disponibles son la fuente de verdad.
@@ -95,6 +95,80 @@ Caso de uso relacionado:
 
 NO generar:
 Producto: ... | Módulo: ... | Descripción: ... | Resultado esperado: ...
+
+## 9A. FORMATO VISUAL DE LA DESCRIPTION — OBLIGATORIO
+
+La Description debe conservar una presentación limpia, espaciosa y legible, equivalente al formato aprobado para Azure DevOps.
+
+Usar exactamente estos bloques separados por una línea en blanco:
+
+Producto: ...
+
+Módulo: ...
+
+Descripción: ...
+
+[contenido de la descripción, conservando párrafos, numeraciones y viñetas]
+
+Resultado esperado de la prueba: ...
+
+Precondiciones:
+
+- ...
+
+- ...
+
+Caso de uso relacionado:
+
+- ...
+
+### Reglas de espaciado
+1. Debe existir una línea en blanco entre Producto y Módulo.
+2. Debe existir una línea en blanco entre Módulo y Descripción.
+3. Debe existir una línea en blanco entre el cuerpo de la Descripción y Resultado esperado de la prueba.
+4. Debe existir una línea en blanco entre Resultado esperado de la prueba y Precondiciones.
+5. Debe existir una línea en blanco entre Precondiciones y Caso de uso relacionado.
+6. Cuando la Description contenga listas numeradas o viñetas, cada elemento debe conservar su separación y estructura.
+7. No convertir todo el contenido en un único párrafo.
+8. No eliminar saltos de línea de la fuente cuando estos separen conceptos funcionales.
+9. Mantener títulos de subsecciones, numeraciones y viñetas en líneas independientes.
+10. No juntar bloques mediante espacios, pipes u otros separadores.
+
+### Reglas de listas
+Si la fuente presenta:
+a.
+b.
+c.
+
+o:
+1.
+2.
+3.
+
+o viñetas, conservar la estructura como lista.
+
+No convertir una lista en una oración corrida.
+
+### Reglas de formato enriquecido
+Cuando el destino soporte formato enriquecido:
+- Producto, Módulo, Descripción, Resultado esperado de la prueba, Precondiciones y Caso de uso relacionado deben conservarse como encabezados/etiquetas visualmente diferenciados.
+- Las viñetas deben permanecer como viñetas.
+- Las listas numeradas deben permanecer numeradas.
+- Mantener párrafos separados.
+- No usar HTML inventado si el formato de destino no lo requiere.
+
+## 9B. PROHIBICIÓN ABSOLUTA DE PIPES
+El carácter `|` NO debe utilizarse como separador en ningún campo descriptivo del CP.
+
+No generar:
+Producto: ... | Módulo: ... | Descripción: ...
+
+No generar:
+Descripción: ... | Resultado esperado: ...
+
+No generar pipes para compactar información, separar bloques, sustituir saltos de línea o crear divisores visuales.
+
+Si la fuente contiene un pipe como parte literal de un dato funcional, conservarlo únicamente cuando sea indispensable para representar literalmente la fuente; nunca usarlo como separador creado por el agente.
 
 ## 10. RESULTADO ESPERADO
 Describir el resultado funcional completo.
@@ -313,6 +387,14 @@ Azure:
 - Exactamente 11 columnas.
 - Orden correcto.
 - Sin columnas adicionales.
+
+### Formato visual
+- Producto, Módulo, Description, Resultado esperado, Preconditions y Caso de uso relacionado están separados por líneas en blanco.
+- La Description no está amontonada en un solo párrafo.
+- Las listas y viñetas se conservan.
+- Los títulos/etiquetas de cada bloque son visualmente distinguibles cuando el destino lo permite.
+- No se eliminan saltos de línea necesarios.
+- No existen pipes creados por el agente como separadores.
 
 ## 25. PRIORIDAD DE REGLAS
 1. Documentación actual = fuente de verdad.
