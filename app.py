@@ -2930,116 +2930,108 @@ with st.sidebar:
                 st.success(f"✅ {delete_case_id} eliminado.")
                 st.rerun()
 
-   suites = st.session_state.get("azure_reference_suites", [])
+     suites = st.session_state.get("azure_reference_suites", [])
 
-if suites:
+    if suites:
 
-    suite_options = [
-        f"{_ui_text(s.get('id'), 'SIN ID')} — "
-        f"{_ui_text(s.get('name'), 'Suite sin nombre')}"
-        for s in suites
-    ]
+        suite_options = [
+            f"{_ui_text(s.get('id'), 'SIN ID')} — "
+            f"{_ui_text(s.get('name'), 'Suite sin nombre')}"
+            for s in suites
+        ]
 
-    selected_suite_label = st.selectbox(
-        "2️⃣ Suite",
-        suite_options,
-        key="azure_reference_suite_select",
-    )
+        selected_suite_label = st.selectbox(
+            "2️⃣ Suite",
+            suite_options,
+            key="azure_reference_suite_select",
+        )
 
-    selected_suite_index = suite_options.index(
-        selected_suite_label
-    )
+        selected_suite_index = suite_options.index(
+            selected_suite_label
+        )
 
-    selected_suite = suites[selected_suite_index]
+        selected_suite = suites[selected_suite_index]
 
-    selected_suite_id = selected_suite.get("id")
-    selected_suite_name = selected_suite.get("name")
+        selected_suite_id = selected_suite.get("id")
+        selected_suite_name = selected_suite.get("name")
 
-    # ------------------------------------------------------------
-    # GUARDAR SUITE SELECCIONADA
-    # ------------------------------------------------------------
-    # La numeración de los CP pertenece a la Suite seleccionada.
-    # El consecutivo se reinicia desde 00001 para cada Suite.
-    st.session_state.azure_reference_suite_id = selected_suite_id
-    st.session_state.azure_reference_suite_name = selected_suite_name
+        # --------------------------------------------------------
+        # GUARDAR SUITE SELECCIONADA
+        # --------------------------------------------------------
+        st.session_state.azure_reference_suite_id = (
+            selected_suite_id
+        )
 
-    # Contador lógico de la Suite.
-    # IMPORTANTE:
-    # Este contador NO se utiliza para consultar Test Cases.
-    # Se utilizará posteriormente en la generación/exportación de CP.
-    st.session_state.azure_reference_suite_cp_counter = 1
+        st.session_state.azure_reference_suite_name = (
+            selected_suite_name
+        )
 
-    # ------------------------------------------------------------
-    # CONSULTAR TEST CASES
-    # ------------------------------------------------------------
-    if st.button(
-        "🔎 Consultar Test Cases",
-        key="azure_reference_get_cases"
-    ):
-        try:
+        # --------------------------------------------------------
+        # CONSULTAR TEST CASES
+        # --------------------------------------------------------
+        if st.button(
+            "🔎 Consultar Test Cases",
+            key="azure_reference_get_cases"
+        ):
+            try:
 
-            plan_id_for_suite = (
-                st.session_state.get("azure_reference_plan_id")
-                or selected_plan_id
-            )
+                plan_id_for_suite = (
+                    st.session_state.get(
+                        "azure_reference_plan_id"
+                    )
+                    or selected_plan_id
+                )
 
-            with st.spinner(
-                "Consultando Test Cases de la Suite seleccionada..."
-            ):
-                cases = list_test_cases(
-                    plan_id_for_suite,
+                with st.spinner(
+                    "Consultando Test Cases de la Suite seleccionada..."
+                ):
+                    cases = list_test_cases(
+                        plan_id_for_suite,
+                        selected_suite_id
+                    )
+
+                # ------------------------------------------------
+                # GUARDAR INFORMACIÓN DE LA SUITE
+                # ------------------------------------------------
+                st.session_state.azure_reference_suite_id = (
                     selected_suite_id
                 )
 
-            # ----------------------------------------------------
-            # GUARDAR INFORMACIÓN DE LA SUITE
-            # ----------------------------------------------------
-            st.session_state.azure_reference_suite_id = (
-                selected_suite_id
-            )
+                st.session_state.azure_reference_suite_name = (
+                    selected_suite_name
+                )
 
-            st.session_state.azure_reference_suite_name = (
-                selected_suite_name
-            )
+                # ------------------------------------------------
+                # GUARDAR TEST CASES CONSULTADOS
+                # ------------------------------------------------
+                st.session_state.azure_reference_cases = cases
 
-            # ----------------------------------------------------
-            # REINICIAR CONTADOR DE CP
-            # ----------------------------------------------------
-            # Cada Suite comienza nuevamente en 00001.
-            st.session_state.azure_reference_suite_cp_counter = 1
+                st.session_state.azure_reference_case_id = None
 
-            # ----------------------------------------------------
-            # GUARDAR TEST CASES CONSULTADOS
-            # ----------------------------------------------------
-            st.session_state.azure_reference_cases = cases
+                # Evita conservar una selección anterior.
+                st.session_state.pop(
+                    "azure_reference_case_select",
+                    None
+                )
 
-            st.session_state.azure_reference_case_id = None
+                st.session_state.azure_reference_detail = None
+                st.session_state.azure_reference_preview = None
 
-            # Evita que Streamlit conserve la selección
-            # "None —" de una ejecución anterior.
-            st.session_state.pop(
-                "azure_reference_case_select",
-                None
-            )
+                st.success(
+                    f"✅ {len(cases)} Test Case(s) encontrados."
+                )
 
-            st.session_state.azure_reference_detail = None
-            st.session_state.azure_reference_preview = None
+            except AzureDevOpsError as exc:
 
-            st.success(
-                f"✅ {len(cases)} Test Case(s) encontrados."
-            )
+                st.error(
+                    f"❌ No se pudieron consultar los Test Cases: {exc}"
+                )
 
-        except AzureDevOpsError as exc:
+            except Exception as exc:
 
-            st.error(
-                f"❌ No se pudieron consultar los Test Cases: {exc}"
-            )
-
-        except Exception as exc:
-
-            st.error(
-                f"❌ Error inesperado al consultar Test Cases: {exc}"
-            )
+                st.error(
+                    f"❌ Error inesperado al consultar Test Cases: {exc}"
+                )
 
     cases = st.session_state.get("azure_reference_cases", [])
     st.markdown("### 3️⃣ Test Case de referencia")
