@@ -1074,3 +1074,448 @@ Cuando exista conflicto entre fuentes:
 4. Nunca utilizar el CP de referencia para contradecir o reemplazar una regla del CU actual.
 
 La referencia sirve para enseñar al agente cómo ejecutar y documentar el flujo, no qué comportamiento funcional debe inventar.
+
+---
+# V54 — RESTAURACIÓN DE ESTRUCTURA APROBADA + CU REFERENCIADO
+
+## 58. NO MODIFICAR LA ESTRUCTURA APROBADA DEL CP
+
+Las reglas V52/V53 agregan comportamiento, pero NO reemplazan ni eliminan la estructura aprobada de los CP del proyecto.
+
+Cada CP debe conservar obligatoriamente estos bloques y en este orden:
+
+1. Título
+2. Description
+3. Resultado esperado de la prueba
+4. Preconditions
+5. Caso de uso relacionado
+6. Steps
+
+La Description debe mantener separación visual real entre párrafos y bloques.
+
+NO usar `\n` como texto visible.
+NO usar `/n` como texto visible.
+NO usar pipes `|` como separadores.
+NO compactar todos los bloques en una sola línea.
+
+Los saltos de línea deben ser saltos reales compatibles con Azure DevOps.
+
+## 59. CASO DE USO RELACIONADO — OBLIGATORIO
+
+Todo CP debe contener explícitamente el bloque:
+
+Caso de uso relacionado:
+
+- CU-XXX - [Nombre del CU]
+
+El CU debe corresponder al CU que originó el CP.
+
+Nunca dejar este bloque vacío.
+
+Nunca reemplazarlo por:
+
+- Test Case relacionado
+- CU relacionado
+- Referencia
+- Fuente
+
+Debe conservar exactamente el encabezado:
+
+Caso de uso relacionado:
+
+y debajo el CU correspondiente.
+
+Ejemplo:
+
+Caso de uso relacionado:
+
+- CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+Si el nombre exacto del CU está disponible en la fuente, conservarlo. No inventar ni modificar el nombre.
+
+## 60. TRAZABILIDAD OBLIGATORIA CU → CP
+
+Antes de generar cada CP, identificar explícitamente el CU origen.
+
+Cada CP debe mantener una relación uno a uno con su CU origen:
+
+CP → un CU.
+
+Si un CU genera varios CP por diferencias funcionales, todos los CP deben referenciar el mismo CU.
+
+Ejemplo:
+
+CU-332
+→ CP-ACGG-00009 Pesos Reales
+→ Caso de uso relacionado: CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+CU-332
+→ CP-ACGG-00010 Pesos Ajustados
+→ Caso de uso relacionado: CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+## 61. LA REFERENCIA DE AZURE NO ES EL CU
+
+El Test Case seleccionado en Azure es únicamente referencia de:
+
+- ruta;
+- navegación;
+- estructura;
+- nivel de detalle;
+- estilo de ejecución.
+
+El CU actual continúa siendo la fuente de verdad funcional.
+
+Por lo tanto:
+
+CP generado
+→ Caso de uso relacionado = CU actual.
+
+NO:
+
+CP generado
+→ Caso de uso relacionado = CU del Test Case de referencia.
+
+El Test Case de referencia NO debe aparecer en lugar del CU relacionado.
+
+## 62. TÍTULO + SUITE + CU
+
+Mantener simultáneamente las tres trazabilidades:
+
+Título:
+`CP-AC[INICIALES_SUITE]-##### [Descripción funcional]`
+
+Description:
+ruta funcional + comportamiento del CU.
+
+Caso de uso relacionado:
+CU que originó el CP.
+
+Ejemplo completo:
+
+Título:
+CP-ACGG-00009 Crear subsección Distribución peso Cobertura por Producto en Características Generales
+
+Description:
+Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que la hoja Orden Emisión, en la sección Características Generales, contenga la subsección Distribución Peso Cobertura por Producto con la estructura y reglas definidas en el CU.
+
+Resultado esperado de la prueba:
+La subsección se genera con la estructura, productos, coberturas y reglas de cálculo definidas.
+
+Preconditions:
+- Contar con usuario del perfil suscriptor con acceso al módulo de colectivos.
+- Contar con un colectivo en estado Cotizado.
+- Contar con las parametrizaciones requeridas por el CU.
+
+Caso de uso relacionado:
+- CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+Steps:
+Cada paso debe conservar Action y Expected según la estructura aprobada.
+
+## 63. CONTROL DE INTEGRIDAD ANTES DE ENTREGAR
+
+Antes de entregar los CP verificar obligatoriamente:
+
+- Cada CU identificado tiene mínimo un CP.
+- Cada CP tiene un único CU relacionado.
+- El bloque "Caso de uso relacionado:" existe.
+- El bloque contiene el CU correcto.
+- El CU relacionado corresponde al CU actual y no al CP de referencia.
+- El título conserva el formato CP-AC + iniciales de Suite + consecutivo de cinco dígitos.
+- La Description inicia con la ruta funcional cuando existe una ruta sustentada.
+- La ruta incluye el perfil cuando está documentado o sustentado por el CP de referencia.
+- No existen pipes `|`.
+- No aparece `/n` ni `\n` como texto visible.
+- Se conservan saltos reales entre bloques.
+- Existen Description, Resultado esperado de la prueba, Preconditions, Caso de uso relacionado y Steps.
+- No se eliminan bloques por intentar hacer el CP más corto.
+- El CP de referencia se usa como patrón y no reemplaza la trazabilidad del CU.
+
+Si alguna condición falla, el CP debe corregirse antes de entregarse.
+
+## 64. PRIORIDAD DE ESTA RESTAURACIÓN
+
+Estas reglas son complementarias a las reglas anteriores.
+
+No eliminar:
+- mínimo 1 CP por CU;
+- profundidad funcional;
+- ruta funcional;
+- uso del CP de Azure como referencia;
+- no invención;
+- división por comportamiento funcional;
+- Nuevo/Renovación solo cuando exista diferencia funcional;
+- formato de Azure;
+- estructura aprobada del CP.
+
+El objetivo es recuperar el comportamiento completo:
+
+DOCUMENTACIÓN
+→ CU identificado
+→ CP de Azure seleccionado como referencia
+→ ruta y estructura heredadas como patrón
+→ reglas del CU aplicadas
+→ título con módulo + Suite
+→ Description con ruta
+→ Resultado esperado
+→ Preconditions
+→ Caso de uso relacionado con el CU correcto
+→ Steps
+
+---
+# V55 — ESTRUCTURA VISUAL OBLIGATORIA DEL CP
+
+## 65. ESTRUCTURA EXACTA DE LA DESCRIPTION
+
+La Description NO debe ser un resumen compacto.
+
+Debe conservar exactamente estos bloques, en este orden:
+
+**Producto:** Cotizadores Web.
+
+**Módulo:** Cotizador Autos Colectivos.
+
+**Descripción:** [ruta funcional + descripción detallada de la funcionalidad y todas las validaciones del CU]
+
+**Resultado esperado de la prueba:** [resultado esperado]
+
+**Precondiciones:**
+
+- [precondición 1]
+- [precondición 2]
+- [precondición 3]
+
+**Caso de uso relacionado:**
+
+- CU-XXX - [nombre exacto del CU]
+
+Estos bloques son obligatorios para TODOS los CP.
+
+No eliminar Producto.
+No eliminar Módulo.
+No eliminar Descripción.
+No eliminar Resultado esperado de la prueba.
+No eliminar Precondiciones.
+No eliminar Caso de uso relacionado.
+
+## 66. PRODUCTO Y MÓDULO
+
+Usar exactamente:
+
+**Producto:** Cotizadores Web.
+
+**Módulo:** Cotizador Autos Colectivos.
+
+No cambiar la denominación.
+No abreviar.
+No mover estos campos dentro de la Description.
+
+## 67. DESCRIPTION — RUTA + DETALLE FUNCIONAL
+
+Después de **Descripción:** debe comenzar la ruta funcional cuando esté sustentada:
+
+"Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que..."
+
+Después de la ruta deben aparecer TODAS las reglas funcionales del CU.
+
+No resumir las reglas.
+
+Si el CU contiene listas, mantener las listas.
+
+Si contiene orden, mantener el orden.
+
+Si contiene condiciones, mantener las condiciones.
+
+Si contiene homologaciones, mantener los criterios de homologación.
+
+Si contiene referencias a otros CU, conservarlas.
+
+## 68. SALTOS Y SEPARACIÓN VISUAL
+
+Cada bloque debe quedar separado mediante saltos de línea reales.
+
+La Description debe visualizarse como:
+
+Producto: ...
+
+Módulo: ...
+
+Descripción: [primer párrafo]
+
+[segundo párrafo]
+
+- elemento
+- elemento
+
+1. elemento
+2. elemento
+
+Resultado esperado de la prueba: ...
+
+Precondiciones:
+
+- ...
+
+Caso de uso relacionado:
+
+- ...
+
+NO convertir todo en:
+
+Producto: ... Módulo: ... Descripción: ... Resultado esperado: ... Precondiciones: ... Caso de uso...
+
+NO escribir los caracteres literales:
+
+\n
+/n
+
+NO utilizar pipes `|` como separadores.
+
+## 69. LISTAS DENTRO DE DESCRIPTION
+
+Las listas explícitas del CU deben conservarse como listas.
+
+Ejemplo:
+
+Validar que la tabla presente las siguientes coberturas básicas en filas y en el orden definido:
+
+- Prima RCE
+- Prima PPD
+- Prima PTD
+- Prima PTH
+- Prima PPH
+
+Y:
+
+Validar que los productos base se presenten en columnas en el siguiente orden:
+
+1. Liviano
+2. Liviano Comercial
+3. Liviano RC
+...
+
+No convertir estas listas en una sola oración.
+
+## 70. CASO DE USO RELACIONADO — FORMATO EXACTO
+
+Siempre incluir al final de la Description:
+
+**Caso de uso relacionado:**
+
+- CU-XXX - [nombre exacto del CU]
+
+Para el CU-332, por ejemplo:
+
+**Caso de uso relacionado:**
+
+- CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+El nombre debe provenir de la fuente.
+
+No usar como sustituto el Test Case de referencia.
+
+## 71. EJEMPLO CANÓNICO DE ESTRUCTURA
+
+Para un CP del CU-332, una estructura correcta es:
+
+**Producto:** Cotizadores Web.
+
+**Módulo:** Cotizador Autos Colectivos.
+
+**Descripción:** Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que la hoja Orden Emisión, en la sección Características Generales, contenga la subsección Distribución Peso Cobertura por Producto con la tabla Pesos Reales.
+
+Validar que la tabla presente las siguientes coberturas básicas en filas y en el orden definido:
+
+- Prima RCE
+- Prima PPD
+- Prima PTD
+- Prima PTH
+- Prima PPH
+
+Validar que los productos base se presenten en columnas en el siguiente orden:
+
+1. Liviano
+2. Liviano Comercial
+3. Liviano RC
+4. Liviano Gama alta
+5. Moto
+6. Moto comercial
+7. Moto Gama alta
+8. Moto RC
+9. Pesado
+10. Pesado RC
+11. Remolque
+12. Pesado Alta Gama
+13. Pesado Bus
+14. Pesado Bus Alta Gama
+
+Validar que los nuevos productos creados para el parque automotor se incluyan en el orden de creación.
+
+Validar que los productos base presenten los pesos parametrizados en la tabla Distribución pesos coberturas Básicas definida en el CU-337.
+
+Validar que para los productos nuevos se realice la homologación tomando la agrupación con mayor cantidad de vehículos según Tipo de Vehículo + Uso + Alta Gama, identificando el producto base que tenga la misma agrupación y todas las coberturas básicas, para asignar al producto nuevo la distribución correspondiente.
+
+**Resultado esperado de la prueba:** La tabla Pesos Reales se genera con las coberturas y productos en el orden definido, presenta los pesos parametrizados para los productos base y aplica correctamente la homologación de los productos nuevos según la agrupación mayoritaria del parque automotor.
+
+**Precondiciones:**
+
+- Contar con usuario del perfil suscriptor con acceso al módulo de colectivos.
+- Contar con un colectivo en estado Cotizado.
+- Contar con productos base parametrizados.
+- Contar con la parametrización de distribución de pesos de coberturas básicas definida en CU-337.
+- Contar con un producto nuevo creado para el parque automotor.
+
+**Caso de uso relacionado:**
+
+- CU-332 - Crear Subsección Distribución peso Cobertura por Producto - General.
+
+Este ejemplo define la ESTRUCTURA, no obliga a copiar literalmente el contenido para otros CU.
+
+## 72. REGLA DE NO COMPACTACIÓN
+
+El agente debe priorizar la estructura visual aprobada sobre la reducción de tokens.
+
+No compactar campos para ahorrar espacio.
+
+No eliminar párrafos.
+
+No convertir listas en texto corrido.
+
+No convertir Precondiciones en una oración.
+
+No convertir Caso de uso relacionado en texto inline.
+
+## 73. VALIDACIÓN ESTRUCTURAL FINAL
+
+Antes de entregar cada CP verificar:
+
+1. Existe Producto.
+2. Existe Módulo.
+3. Existe Description.
+4. Description comienza con ruta funcional cuando está sustentada.
+5. Description conserva párrafos.
+6. Description conserva listas.
+7. Existe Resultado esperado de la prueba.
+8. Existe Preconditions.
+9. Existe Caso de uso relacionado.
+10. El Caso de uso relacionado corresponde al CU actual.
+11. Existen Steps en la estructura de ejecución.
+12. No hay pipes.
+13. No hay `/n`.
+14. No hay `\n` visible.
+15. No está todo el contenido en una sola línea.
+16. El título cumple `CP-AC[SUITE]-##### [Descripción funcional]`.
+17. El CP usa el CP de Azure seleccionado como referencia de ruta y estructura cuando corresponde.
+18. El CP de referencia no sustituye al CU actual.
+
+Si cualquiera de estos controles falla, regenerar/corregir el CP antes de entregarlo.
+
+## 74. PRIORIDAD DE ESTRUCTURA
+
+La estructura aprobada por el proyecto es obligatoria incluso cuando el modelo considere que una versión más corta sería suficiente.
+
+El agente NO debe interpretar "Descripción" como un campo para un resumen.
+
+La Description debe ser la descripción funcional completa y ejecutable del CP.
+
+La información no debe perderse por intentar producir CP más cortos.
