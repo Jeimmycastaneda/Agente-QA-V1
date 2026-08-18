@@ -704,61 +704,169 @@ def _extract_related_cu(tc):
 
 
 def calculate_cu_coverage(cases, identified_use_cases):
-    """Mínimo 1 CP por cada CU y exactamente 1 CU por CP."""
+    """
+    Valida la cobertura CU -> CP.
+
+    Reglas:
+    - Mínimo 1 CP por cada CU identificado.
+    - Cada CP debe tener exactamente 1 CU relacionado.
+    - No se acepta un CP sin CU.
+    - No se acepta un CP relacionado con múltiples CU.
+    - El ID de respaldo utiliza el formato CP-ACGG-#####.
+
+    IMPORTANTE:
+    La numeración por Suite NO se realiza aquí.
+    Esta función únicamente valida trazabilidad y cobertura.
+    """
+
+    # ============================================================
+    # CONSTRUIR MAPA DE CASOS DE USO
+    # ============================================================
     cu_map = {}
+
     for cu in identified_use_cases or []:
         if isinstance(cu, dict):
             cid = str(
-                cu.get("ID") or cu.get("id") or
-                cu.get("Use Case ID") or cu.get("CU") or ""
+                cu.get("ID")
+                or cu.get("id")
+                or cu.get("Use Case ID")
+                or cu.get("CU")
+                or ""
             ).strip()
+
             name = str(
-                cu.get("Name") or cu.get("name") or
-                cu.get("Title") or cu.get("Description") or ""
+                cu.get("Name")
+                or cu.get("name")
+                or cu.get("Title")
+                or cu.get("Description")
+                or ""
             ).strip()
+
         else:
             cid = str(cu).strip()
             name = cid
-        if cid:
-            cu_map[_normalize_cu(cid)] = {"id": cid, "name": name or cid}
 
+        if cid:
+            normalized_cid = _normalize_cu(cid)
+
+            cu_map[normalized_cid] = {
+                "id": cid,
+                "name": name or cid,
+            }
+
+    # ============================================================
+    # VARIABLES DE COBERTURA
+    # ============================================================
     covered = {}
+
     cp_without_cu = []
     cp_multiple_cu = []
 
+    # ============================================================
+    # VALIDAR CADA CP
+    # ============================================================
     for index, tc in enumerate(cases or [], start=1):
-        cp_id = str(tc.get("ID") or f"CP-{index:05d}").strip()
+
+        # ID real del CP.
+        # Si por alguna razón el CP no tiene ID, utilizar un ID temporal
+        # únicamente para reportar el error de cobertura.
+        cp_id = str(
+            tc.get("ID")
+            or f"CP-ACGG-{index:05d}"
+        ).strip()
+
+        # --------------------------------------------------------
+        # EXTRAER CU RELACIONADOS
+        # --------------------------------------------------------
         relations = _extract_related_cu(tc)
 
+        # --------------------------------------------------------
+        # CP SIN CU
+        # --------------------------------------------------------
         if len(relations) == 0:
             cp_without_cu.append(cp_id)
             continue
+
+        # --------------------------------------------------------
+        # CP CON MÁS DE UN CU
+        # --------------------------------------------------------
         if len(relations) != 1:
             cp_multiple_cu.append(cp_id)
             continue
 
+        # --------------------------------------------------------
+        # NORMALIZAR CU
+        # --------------------------------------------------------
         rel = _normalize_cu(relations[0])
+
         matched = None
+
+        # --------------------------------------------------------
+        # BUSCAR EL CU EN LOS CU IDENTIFICADOS
+        # --------------------------------------------------------
         for cu_key, cu_info in cu_map.items():
-            if rel == cu_key or rel == _normalize_cu(cu_info["name"]):
+
+            normalized_name = _normalize_cu(
+                cu_info["name"]
+            )
+
+            if (
+                rel == cu_key
+                or rel == normalized_name
+            ):
                 matched = cu_key
                 break
 
+        # --------------------------------------------------------
+        # CP CON CU NO IDENTIFICADO EN LA FUENTE
+        # --------------------------------------------------------
         if matched is None:
             cp_without_cu.append(cp_id)
-        else:
-            covered.setdefault(matched, []).append(cp_id)
 
+        else:
+            covered.setdefault(
+                matched,
+                []
+            ).append(cp_id)
+
+    # ============================================================
+    # IDENTIFICAR CU SIN CP
+    # ============================================================
     missing = [
-        info for key, info in cu_map.items()
+        info
+        for key, info in cu_map.items()
         if key not in covered
     ]
 
+    # ============================================================
+    # MÉTRICAS
+    # ============================================================
     total_cu = len(cu_map)
     total_cp = len(cases or [])
     covered_count = len(covered)
-    percentage = round((covered_count / total_cu) * 100, 1) if total_cu else 0.0
 
+    percentage = (
+        round(
+            (covered_count / total_cu) * 100,
+            1
+        )
+        if total_cu
+        else 0.0
+    )
+
+    # ============================================================
+    # VALIDACIÓN FINAL
+    # ============================================================
+    valid = (
+        total_cu > 0
+        and not missing
+        and not cp_without_cu
+        and not cp_multiple_cu
+    )
+
+    # ============================================================
+    # RESULTADO
+    # ============================================================
     return {
         "total_cu": total_cu,
         "total_cp": total_cp,
@@ -767,12 +875,7 @@ def calculate_cu_coverage(cases, identified_use_cases):
         "cp_without_cu": cp_without_cu,
         "cp_multiple_cu": cp_multiple_cu,
         "percentage": percentage,
-        "valid": (
-            total_cu > 0
-            and not missing
-            and not cp_without_cu
-            and not cp_multiple_cu
-        ),
+        "valid": valid,
     }
 
 
@@ -882,7 +985,7 @@ EXCEL_CONFIGS = {
         "base_testpoint": 1001,
         "configuration": "Default configuration",
         "tester": "",
-        "title_prefix": "CP-AC-",
+        "title_prefix": "CP-ACGG-",
         "user_default": "Usuario registrado",
         "steps_with_users": True,
         "area_path": "COTIZADORES WEB\\DESARROLLO",
@@ -1165,22 +1268,27 @@ def module_token(module, title="", scenario=""):
 
 def build_case_title(tc, case_id):
     """
-    V12: garantiza que Title sea un título funcional y no el CP ID.
-    Prioridad:
-      1) Title generado por el modelo si no es solo el ID.
-      2) Scenario
-      3) Description
-      4) Related Use Case
-      5) fallback controlado.
-    """
-    raw_title = safe_text(tc.get("Title"))
-    normalized_title = re.sub(r"\s+", " ", raw_title).strip()
+    Formato aprobado:
 
-    # Un título igual al ID no es un título funcional.
+    CP-ACGG-00009 Validar tabla Pesos Reales de Distribución Peso Cobertura por Producto
+    """
+
+    raw_title = safe_text(tc.get("Title"))
+
+    normalized_title = re.sub(
+        r"\s+",
+        " ",
+        raw_title
+    ).strip()
+
+    # Si Gemini devuelve únicamente el ID, buscar una descripción útil.
     if (
         not normalized_title
         or normalized_title.upper() == case_id.upper()
-        or re.fullmatch(r"CP-[A-Z0-9_-]+-\d{5}", normalized_title.upper())
+        or re.fullmatch(
+            r"CP-[A-Z0-9_-]+-\d{5}",
+            normalized_title.upper()
+        )
     ):
         candidates = [
             safe_text(tc.get("Scenario")),
@@ -1189,23 +1297,54 @@ def build_case_title(tc, case_id):
         ]
 
         for candidate in candidates:
-            candidate = re.sub(r"\s+", " ", candidate).strip()
+            candidate = re.sub(
+                r"\s+",
+                " ",
+                candidate
+            ).strip()
+
             if candidate and candidate.upper() != case_id.upper():
                 normalized_title = candidate
                 break
 
     if not normalized_title:
-        normalized_title = f"Caso de prueba {case_id}"
+        normalized_title = f"Validar caso de uso {case_id}"
 
-    return normalized_title
+    # Evitar duplicar el ID.
+    normalized_title = re.sub(
+        rf"^\s*{re.escape(case_id)}\s*[-:|]?\s*",
+        "",
+        normalized_title,
+        flags=re.IGNORECASE,
+    ).strip(" -:|")
+
+    # No permitir pipes.
+    normalized_title = normalized_title.replace("|", " ")
+
+    normalized_title = re.sub(
+        r"\s+",
+        " ",
+        normalized_title
+    ).strip()
+
+    return f"{case_id} {normalized_title}".strip()
 
 
-def normalize_case_id(raw_id, module, index, prefix="CP-AC-"):
+def normalize_case_id(raw_id, module, index, prefix="CP-ACGG-"):
+    """
+    Genera el ID del Caso de Prueba.
+
+    Regla:
+    - Autos Colectivos usa CP-ACGG-#####
+    - La numeración se reinicia por Suite.
+    - index debe ser el consecutivo de la Suite actual.
+    """
     candidate = safe_text(raw_id)
-    if re.fullmatch(r"CP-AC-[A-Za-z0-9_-]+-\d{5}", candidate):
-        return candidate
-    return f"{prefix}{module_token(module)}-{index:05d}"
 
+    if re.fullmatch(r"CP-[A-Z0-9]+-\d{5}", candidate, flags=re.IGNORECASE):
+        return candidate.upper()
+
+    return f"{prefix}{index:05d}"
 
 def find_coverage(data, tc):
     tc_id = safe_text(tc.get("ID"))
