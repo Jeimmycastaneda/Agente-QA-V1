@@ -15,6 +15,7 @@ import base64
 import html
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -86,31 +87,86 @@ def _as_lines(value: Any) -> list[str]:
     return [line.strip(" •-\t") for line in text.splitlines() if line.strip()]
 
 
-def _section(title: str, value: Any) -> str:
-    """Construye una seccion HTML en un bloque propio para Azure DevOps.
+def _render_rich_text(value: Any) -> str:
+    """Convierte texto del CP a HTML conservando párrafos, listas y saltos reales.
 
-    Cada seccion se envia como un <p> independiente y las listas como
-    <ul>/<li>, evitando que Azure colapse toda la Description en una sola linea.
+    No usa pipes como separadores y nunca convierte cada línea de un bloque en
+    una lista automáticamente.
     """
-    lines = _as_lines(value)
-    if not lines:
+    if value is None:
         return ""
+    if isinstance(value, list):
+        lines = [_safe(x) for x in value if _safe(x)]
+        text = "\n".join(lines)
+    else:
+        text = _safe(value)
 
+    # Corrige escapes literales provenientes de modelos/serialización.
+    text = text.replace(r"\r\n", "\n").replace(r"\n", "\n").replace(r"\r", "\n")
+    # Nunca usar pipe como separador visual.
+    text = text.replace("|", "\n")
+
+    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+    html_blocks = []
+
+    for block in blocks:
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines:
+            continue
+
+        # Lista con viñetas.
+        bullet_lines = []
+        all_bullets = True
+        for ln in lines:
+            m = re.match(r"^[-•●▪◦]\s+(.*)$", ln)
+            if m:
+                bullet_lines.append(m.group(1).strip())
+            else:
+                all_bullets = False
+                break
+        if all_bullets and bullet_lines:
+            html_blocks.append("<ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in bullet_lines) + "</ul>")
+            continue
+
+        # Lista numerada o con numeración romana: conservar como líneas separadas.
+        if all(re.match(r"^(?:[ivxlcdm]+\.|\d+[.)])\s+", ln, re.I) for ln in lines):
+            html_blocks.append("<ol>" + "".join(
+                f"<li>{html.escape(re.sub(r'^(?:[ivxlcdm]+\.|\d+[.)])\s+', '', ln, flags=re.I))}</li>"
+                for ln in lines
+            ) + "</ol>")
+            continue
+
+        # Párrafo: conservar saltos internos con <br>.
+        html_blocks.append("<p>" + "<br>".join(html.escape(ln) for ln in lines) + "</p>")
+
+    return "".join(html_blocks)
+
+
+def _section(title: str, value: Any) -> str:
+    """Construye cada bloque principal de Description como un párrafo HTML.
+
+    Las listas internas se conservan como listas; no se convierten todas las
+    líneas en <li>. Esto evita que Azure compacte o distorsione la Description.
+    """
+    rendered = _render_rich_text(value)
+    if not rendered:
+        return ""
     label = f"<strong>{html.escape(title)}:</strong>"
-    if len(lines) == 1:
-        return f"<p>{label} {html.escape(lines[0])}</p>"
 
-    body = "<ul>" + "".join(
-        f"<li>{html.escape(line)}</li>" for line in lines
-    ) + "</ul>"
-    return f"<p>{label}</p>{body}"
+    # Para valores simples, etiqueta y contenido permanecen en el mismo
+    # párrafo. Para contenido con listas/párrafos, la etiqueta queda arriba
+    # y el contenido conserva su estructura visual.
+    plain = _safe(value).replace(r"\r\n", "\n").replace(r"\n", "\n").strip()
+    if "\n" not in plain and "<ul>" not in rendered and "<ol>" not in rendered:
+        return f"<p>{label} {rendered[3:-4] if rendered.startswith('<p>') and rendered.endswith('</p>') else rendered}</p>"
+    return f"<p>{label}</p>{rendered}"
 
 
 def build_description_html(test_case: dict[str, Any]) -> str:
-    """Construye la Description real de Azure con separacion por parrafos.
+    """Construye la Description HTML final para Azure DevOps.
 
-    Orden aprobado: Producto, Modulo, Descripcion, Resultado esperado de la
-    prueba, Precondiciones y Caso de uso relacionado. No agrega informacion.
+    Orden aprobado: Producto, Módulo, Descripción, Resultado esperado de la
+    prueba, Precondiciones y Caso de uso relacionado.
     """
     parts = [
         _section("Producto", test_case.get("Product")),
@@ -120,7 +176,8 @@ def build_description_html(test_case: dict[str, Any]) -> str:
         _section("Precondiciones", test_case.get("Preconditions")),
         _section("Caso de uso relacionado", test_case.get("Related Use Case")),
     ]
-    return "".join(p for p in parts if p)
+    return "".join(parts)
+
 
 def _step_number(step: dict[str, Any], fallback: int) -> int:
     raw = step.get("Step #", fallback)
