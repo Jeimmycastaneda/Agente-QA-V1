@@ -941,6 +941,7 @@ SCHEMA = {
                     "Preconditions": {"type": "string"},
                     "Product": {"type": "string"},
                     "Module": {"type": "string"},
+                    "Route": {"type": "string"},
                     "Related Use Case": {"type": "string"},
                     "Criterion": {"type": "string"},
                     "Scenario": {"type": "string"},
@@ -1200,18 +1201,18 @@ def module_token(module, title="", scenario=""):
 
 def build_case_title(tc, case_id):
     """
-    V12: garantiza que Title sea un título funcional y no el CP ID.
-    Prioridad:
-      1) Title generado por el modelo si no es solo el ID.
-      2) Scenario
-      3) Description
-      4) Related Use Case
-      5) fallback controlado.
+    Construye el texto funcional del título eliminando IDs/prefijos duplicados.
+    El ID definitivo se agrega una sola vez mediante full_case_title().
     """
     raw_title = safe_text(tc.get("Title"))
     normalized_title = re.sub(r"\s+", " ", raw_title).strip()
 
-    # Un título igual al ID no es un título funcional.
+    cp_pattern = r"^CP-AC[A-Z0-9_-]+-\d{5}\s*[-:–—]?\s*"
+    while re.match(cp_pattern, normalized_title, flags=re.I):
+        normalized_title = re.sub(
+            cp_pattern, "", normalized_title, count=1, flags=re.I
+        ).strip()
+
     if (
         not normalized_title
         or normalized_title.upper() == case_id.upper()
@@ -1222,17 +1223,31 @@ def build_case_title(tc, case_id):
             safe_text(tc.get("Description")),
             safe_text(tc.get("Related Use Case")),
         ]
-
         for candidate in candidates:
             candidate = re.sub(r"\s+", " ", candidate).strip()
-            if candidate and candidate.upper() != case_id.upper():
+            candidate = re.sub(
+                cp_pattern, "", candidate, count=1, flags=re.I
+            ).strip()
+            if candidate and not re.fullmatch(
+                r"CP-[A-Z0-9_-]+-\d{5}", candidate.upper()
+            ):
                 normalized_title = candidate
                 break
 
-    if not normalized_title:
-        normalized_title = f"Caso de prueba {case_id}"
+    return normalized_title or f"Caso de prueba {case_id}"
 
-    return normalized_title
+
+def full_case_title(tc, case_id):
+    """Título final: exactamente un ID funcional + un espacio + título descriptivo."""
+    base = build_case_title(tc, case_id)
+    base = re.sub(
+        rf"^(?:{re.escape(case_id)}\s*)+",
+        "",
+        base,
+        flags=re.I,
+    ).strip()
+    return f"{case_id} {base}".strip()
+
 
 
 def suite_token(suite_name):
@@ -1268,14 +1283,6 @@ def assign_suite_case_ids(cases, suite_name):
         tc["ID"] = cp_id
         used.add(cp_id)
     return cases
-
-
-def full_case_title(tc, case_id):
-    """Título final aprobado: ID funcional + espacio + título descriptivo."""
-    base = build_case_title(tc, case_id)
-    if base.upper().startswith(case_id.upper() + " "):
-        return base
-    return f"{case_id} {base}".strip()
 
 
 def normalize_case_id(raw_id, module, index, prefix="CP-AC-"):
@@ -1556,6 +1563,32 @@ completo o casi completo del CU, HAZLO. No reduzcas el CU a una frase genérica.
 - No inventar contenido para completar Producto, Módulo, Resultado esperado, Precondiciones o Caso de uso relacionado. Si un dato no está definido en la fuente, indicarlo como pendiente/por validar según las reglas de no invención.
 - La Description debe poder pegarse/importarse directamente en el campo Description de Azure DevOps y conservar saltos de línea, listas y jerarquía funcional cuando sea posible.
 
+2B. RUTA FUNCIONAL Y FORMATO DE REDACCIÓN
+- Cuando la HU/CU o el CP de referencia permitan identificar la navegación funcional,
+  el campo Route debe contener una ruta descriptiva y legible, por ejemplo:
+  "Colectivos Autos > Reportes > Colfleet".
+- La ruta debe reflejar únicamente opciones, menús, módulos o pantallas sustentados
+  por la fuente o por el CP de referencia cuando corresponda al mismo flujo funcional.
+- La ruta debe aparecer en la Description y en el Resultado esperado cuando esté disponible.
+- Mantener una línea en blanco entre bloques y párrafos.
+- Cuando la fuente contenga listas de validaciones, campos, reglas, condiciones o escenarios,
+  usar viñetas para mejorar la lectura. No convertir cada viñeta en un CP si pertenece al mismo
+  escenario.
+
+2C. CASOS DIFERENCIADOS POR TIPO DE COTIZACIÓN
+- Si un CU contiene reglas funcionales explícitas diferenciadas para cotizaciones NUEVAS y
+  RENOVACIONES, genera CP independientes para cada tipo cuando la validación lo requiera.
+- Para una HU/CU extensa de generación de un reporte donde los campos indiquen "aplica para
+  nuevas" y/o "aplica para renovaciones", distribuir la cobertura en escenarios funcionales
+  coherentes, sin perder ningún campo.
+- Si la fuente exige validar ambos tipos y además existen reglas transversales del archivo,
+  puede generarse un tercer CP complementario/integral para cubrir generación, estructura,
+  orden, nombre, filtros y/o campos comunes que no queden completamente cubiertos en los CP
+  de Nuevas y Renovaciones.
+- El objetivo es cubrir todos los campos y reglas de la fuente evitando duplicación innecesaria.
+- No dividir artificialmente un CU solo por cantidad de campos; la división debe estar justificada
+  por una diferencia funcional real o por la necesidad de asegurar cobertura completa.
+
 3. PASOS COMPLETOS Y EJECUTABLES
 - Los Steps deben cubrir TODO el flujo necesario para ejecutar y validar el escenario.
 - Cada acción funcional relevante del CU debe aparecer como un paso cuando sea
@@ -1663,7 +1696,8 @@ def generate_qa_data(
             "NO debes copiar sus reglas funcionales si no están sustentadas por la nueva HU/CU. La nueva HU/CU sigue siendo la única fuente de verdad funcional. "
             "Usa el CP de referencia como plantilla de estructura y calidad, no como fuente de requisitos. "
             "Conserva la ruta funcional del nuevo escenario únicamente cuando esté sustentada por la nueva fuente. "
-            "La Description del nuevo CP debe mencionar una ruta funcional descriptiva y el Resultado esperado también debe mencionar la ruta, siempre que la fuente la sustente. "
+            "La Description del nuevo CP debe mencionar una ruta funcional descriptiva y el Resultado esperado también debe mencionar la ruta, siempre que la fuente o el CP de referencia la sustenten. "
+            "Si el nuevo escenario pertenece a la misma funcionalidad del CP de referencia, conserva la ruta funcional de referencia solo cuando sea coherente con la nueva HU/CU; no inventes segmentos adicionales. "
             f"\nID referencia: {safe_text(reference_case.get('id'), 'SIN ID')}"
             f"\nTítulo referencia: {safe_text(reference_case.get('title'), 'Sin título')}"
             f"\nDescripción referencia:\n{safe_text(reference_case.get('description'), 'Sin descripción')}"
@@ -1683,6 +1717,8 @@ def generate_qa_data(
         "Usa el CU completo como fuente principal del CP y conserva sus detalles. "
         "Debe existir mínimo un CP por cada CU y cada CP debe corresponder a un solo CU. "
         "No conviertas Steps en CP. "
+        "Cuando el escenario tenga una ruta funcional sustentada, devuelve también el campo Route "
+        "con la ruta descriptiva, sin prefijos de CP ni texto adicional. "
         "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
         "debe validarse contra los CU reales identificados en USE_CASES. "
         "Para determinar Related Use Case aplica esta prioridad estricta: 1) buscar el CU en la Historia de Usuario/documentación; "
@@ -2974,6 +3010,12 @@ if result:
         "Suite",
     )
     assign_suite_case_ids(result.get("TEST_CASES", []), current_suite_name)
+
+    # Normalización final: un solo ID por título y consecutivo único por Suite.
+    for tc in result.get("TEST_CASES", []):
+        cp_id = safe_text(tc.get("ID"))
+        tc["Title"] = full_case_title(tc, cp_id)
+
     # Mantener Excel/PDF sincronizados con los mismos IDs y títulos del preview.
     st.session_state.excel_data = create_excel(result, selected_config)
     st.session_state.pdf_data = create_pdf(
