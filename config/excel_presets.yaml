@@ -1,0 +1,14 @@
+Autos Colectivos:
+  title_prefix: "CP-AC-"
+  area_path: "COTIZADORES WEB\\DESARROLLO"
+  project_origin: "Proyecto"
+
+Siniestros Fasecolda:
+  title_prefix: "CP-ACSF-"
+  area_path: "COTIZADORES WEB\\DESARROLLO"
+  project_origin: "Proyecto"
+
+General QA:
+  title_prefix: "CP-"
+  area_path: "COTIZADORES WEB\\DESARROLLO"
+  project_origin: "Proyecto"

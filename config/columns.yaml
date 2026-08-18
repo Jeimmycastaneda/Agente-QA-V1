@@ -1,0 +1,28 @@
+azure_import:
+  - ID
+  - Work Item Type
+  - Title
+  - Description
+  - Test Step
+  - Step Action
+  - Step Expected
+  - Area Path
+  - IDPadre
+  - Tipo Origen Proyecto
+  - Tiempo Real
+  - Assigned To
+  - State
+
+matriz_qa:
+  - TestCaseId
+  - Title
+  - Requirement / Use Case
+  - Criterion
+  - Scenario
+  - Scenario Type
+  - Description
+  - Preconditions
+  - Validation Method
+  - Coverage
+  - Alerts
+  - Effort

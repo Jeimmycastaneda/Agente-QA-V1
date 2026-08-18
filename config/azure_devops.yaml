@@ -1,0 +1,7 @@
+enabled: false
+api_version: "7.1"
+organization: ""
+project: ""
+area_path: "COTIZADORES WEB\\DESARROLLO"
+parent_from_suite: true
+related_work_from_use_case: true
