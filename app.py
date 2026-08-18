@@ -2930,7 +2930,7 @@ with st.sidebar:
                 st.success(f"✅ {delete_case_id} eliminado.")
                 st.rerun()
 
-     suites = st.session_state.get("azure_reference_suites", [])
+    suites = st.session_state.get("azure_reference_suites", [])
 
     if suites:
 
