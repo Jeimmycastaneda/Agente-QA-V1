@@ -888,3 +888,189 @@ El CP final solo es válido si:
 - No se fusionaron CU diferentes en un único CP.
 
 Si algún punto falla, regenerar los CP faltantes antes de entregar el resultado.
+
+---
+## V52 — CP DE AZURE COMO REFERENCIA REAL DE GENERACIÓN
+
+### 45. REFERENCIA REAL DE AZURE DEVOPS — NO DECORATIVA
+
+Cuando la interfaz permita seleccionar un Test Plan, una Suite y un Test Case de referencia, el CP seleccionado debe considerarse una fuente de referencia estructural para la generación.
+
+La referencia seleccionada NO debe limitarse a mostrarse en pantalla ni utilizarse únicamente para una comparación visual.
+
+Debe utilizarse para orientar la generación del nuevo CP en:
+
+- ruta funcional;
+- perfil de usuario;
+- navegación;
+- secuencia de acciones;
+- estructura de Description;
+- estructura de Preconditions;
+- estructura de Steps;
+- nivel de detalle;
+- redacción de Action;
+- redacción de Expected;
+- forma de expresar validaciones observables.
+
+La referencia NO reemplaza al CU actual y NO es fuente para inventar reglas funcionales.
+
+### 46. CONTEXTO OBLIGATORIO DEL CP DE REFERENCIA
+
+Cuando exista un Test Case de referencia seleccionado, el contexto de generación debe contener, como mínimo, si están disponibles:
+
+- Test Plan;
+- Suite;
+- ID del Test Case;
+- Title;
+- Description;
+- Preconditions;
+- Steps;
+- Expected de cada Step.
+
+El agente debe interpretar el CP de referencia como:
+
+REFERENCIA DE ESTRUCTURA + NAVEGACIÓN + NIVEL DE DETALLE
+
+y el CU/HU/documentación actual como:
+
+FUENTE DE VERDAD FUNCIONAL.
+
+### 47. REGLA DE RUTA A PARTIR DEL CP DE REFERENCIA
+
+Si el CP de referencia contiene una ruta funcional explícita y el CU actual pertenece al mismo flujo funcional, reutilizar la ruta como patrón de navegación.
+
+Ejemplo de patrón:
+
+"Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que..."
+
+Para un CU que valide una sección específica del mismo archivo, mantener la ruta hasta llegar al punto común y después agregar las acciones y validaciones propias del CU.
+
+La ruta debe adaptarse al CU actual y NO copiar acciones que no sean necesarias para ejecutar la prueba.
+
+### 48. HERENCIA CONTROLADA DEL CP DE REFERENCIA
+
+Del CP de referencia se puede heredar:
+
+- forma de iniciar la Description;
+- ruta;
+- perfil;
+- navegación común;
+- contexto de ejecución;
+- patrón de Preconditions;
+- nivel de detalle;
+- estructura de Steps.
+
+Del CP de referencia NO se puede heredar automáticamente:
+
+- reglas de negocio;
+- valores;
+- fórmulas;
+- productos;
+- coberturas;
+- mensajes;
+- resultados;
+- condiciones;
+- excepciones;
+- datos específicos del CU anterior.
+
+Todo elemento funcional específico debe estar sustentado por el CU/HU/documentación actual.
+
+### 49. REGLA PARA EL CASO EN QUE NO EXISTA REFERENCIA
+
+Si no se seleccionó un CP de referencia, utilizar las fuentes documentales disponibles según las reglas anteriores.
+
+No inventar una ruta.
+
+Si existen CP de referencia disponibles pero ninguno fue seleccionado, no asumir automáticamente que todos sus datos funcionales aplican. Utilizar únicamente la información disponible en la documentación y las reglas de contexto que la aplicación entregue explícitamente.
+
+### 50. VALIDACIÓN DEL USO DE REFERENCIA
+
+Antes de entregar los CP, comprobar:
+
+- ¿Existe CP de referencia seleccionado?
+- Si existe, ¿se utilizó su ruta cuando corresponde al mismo flujo?
+- ¿Se conservó el perfil documentado?
+- ¿Se conservó la navegación común?
+- ¿La Description tiene un nivel de detalle comparable?
+- ¿Los Steps tienen una estructura comparable?
+- ¿Se evitaron reglas funcionales copiadas del CP de referencia que no pertenezcan al CU actual?
+- ¿La ruta llega hasta el punto donde inicia la validación específica del CU actual?
+
+Si existe referencia y la nueva Description no incorpora una ruta funcional sustentada por esa referencia cuando el flujo es común, corregir antes de entregar.
+
+### 51. REFERENCIA DE AZURE COMO PATRÓN, NO COMO COPIA
+
+El agente no debe copiar literalmente el CP de referencia.
+
+Debe producir un CP nuevo que conserve el patrón de calidad y navegación, pero cuya cobertura funcional provenga del CU actual.
+
+Ejemplo:
+
+CP de referencia:
+"Generar archivo Base Emisión..."
+
+CU actual:
+"Crear Subsección Distribución Peso Cobertura por Producto..."
+
+Resultado esperado:
+
+"Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos colectivos, consultar colectivo en estado cotizado, descargar el archivo base emisión y validar que la hoja Orden Emisión, en la sección Características Generales, contenga la subsección Distribución Peso Cobertura por Producto..."
+
+No resultado:
+
+"Validar la subsección Distribución Peso Cobertura por Producto..."
+
+### 52. INTEGRACIÓN CON EL FLUJO DE GENERACIÓN
+
+La referencia de Azure debe estar disponible para el motor de generación antes de solicitar a Gemini la creación de los CP.
+
+Conceptualmente, el contexto debe ser:
+
+PROMPT QA
++
+DOCUMENTACIÓN ACTUAL
++
+TEST PLAN DE REFERENCIA
++
+SUITE DE REFERENCIA
++
+TEST CASE DE REFERENCIA
++
+REGLAS DE COBERTURA
+=
+GENERACIÓN DE CP
+
+No considerar suficiente que la interfaz haya realizado una consulta GET si el contenido del Test Case no fue incorporado al contexto enviado al motor.
+
+### 53. REGLA CRÍTICA DE TRAZABILIDAD DE REFERENCIA
+
+El CP generado debe poder explicar funcionalmente:
+
+- de qué CU obtiene sus reglas;
+- de qué referencia obtiene el patrón de navegación;
+- qué elementos son reutilizados como estructura;
+- qué elementos pertenecen exclusivamente al CU actual.
+
+La referencia nunca sustituye la trazabilidad del CU.
+
+### 54. CONTROL FINAL ESPECÍFICO
+
+Un CP generado es inválido cuando:
+
+- se seleccionó un CP de referencia pero la Description ignora completamente su ruta funcional aplicable;
+- se seleccionó un CP de referencia y el nuevo CP vuelve a comenzar directamente con "Validar que..." pese a existir una ruta común sustentada;
+- se copian reglas del CP de referencia que no pertenecen al CU actual;
+- se copia literalmente el CP anterior en lugar de generar el CP del CU actual;
+- la referencia solo se mostró en pantalla pero no se utilizó como contexto de generación;
+- la ruta pierde el perfil o la navegación común que sí está documentada en la referencia.
+
+### 55. PRIORIDAD DE FUENTES
+
+Cuando exista conflicto entre fuentes:
+
+1. CU/HU/documentación actual para reglas funcionales.
+2. Test Plan/Suite para contexto organizacional y ubicación.
+3. CP de referencia para navegación, estructura y nivel de detalle.
+4. Nunca utilizar el CP de referencia para contradecir o reemplazar una regla del CU actual.
+
+La referencia sirve para enseñar al agente cómo ejecutar y documentar el flujo, no qué comportamiento funcional debe inventar.
