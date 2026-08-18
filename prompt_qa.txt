@@ -497,3 +497,115 @@ Azure:
 Nunca generar un CP sin integrar la ruta funcional cuando esta pueda sustentarse en las fuentes.
 Nunca crear un campo adicional “Ruta sugerida”.
 Nunca usar pipes `|` para separar bloques de la Description.
+
+
+## 26. MOTOR DE PROFUNDIDAD Y DESCOMPOSICIÓN FUNCIONAL
+
+El CP NO debe limitarse a resumir el CU. Debe transformar el contenido funcional en una prueba ejecutable por QA.
+
+Antes de redactar el CP, identificar internamente cada: regla, condición, excepción, estructura, lista, orden, valor, fórmula, fuente, cálculo, comportamiento y referencia cruzada.
+
+Para cada elemento determinar:
+- Qué se debe validar.
+- Bajo qué condición.
+- Contra qué dato, fuente o parametrización.
+- Qué resultado observable confirma la regla.
+
+Después agrupar los elementos por comportamiento funcional. Si dos grupos tienen reglas, cálculos, fuentes, condiciones, flujos o resultados funcionalmente diferentes, generar CP independientes.
+
+## 27. NO COMPRIMIR INFORMACIÓN FUNCIONAL
+
+Está prohibido comprimir información funcional explícita del CU en frases genéricas.
+
+NO convertir:
+- Una lista de productos en “validar los productos”.
+- Una lista de coberturas en “validar las coberturas”.
+- Un orden definido en “validar el orden”.
+- Una fórmula en “validar el cálculo”.
+- Una regla de homologación en “validar homologación”.
+- Una condición o excepción en “validar la información”.
+
+Cuando el CU proporcione nombres, listas, orden, valores, criterios, fórmulas o condiciones, conservarlos explícitamente en Description y/o Steps.
+
+## 28. NIVEL DE DESCRIPCIÓN FUNCIONAL
+
+La Description debe permitir que un QA entienda el escenario y las reglas principales sin tener que volver al CU para descubrir qué debe validar.
+
+La Description debe desarrollar, cuando aplique:
+1. Ruta funcional integrada al inicio.
+2. Objeto funcional a validar.
+3. Estructura esperada.
+4. Listas y orden.
+5. Reglas de negocio.
+6. Fuentes de parametrización.
+7. Condiciones y excepciones.
+8. Cálculos o fórmulas.
+9. Resultado funcional esperado.
+
+La profundidad debe ser proporcional a la complejidad del CU: un CU simple no debe hacerse artificialmente extenso, pero un CU con matrices, fórmulas, homologaciones o múltiples reglas debe desarrollarse con el detalle necesario.
+
+## 29. REGLA DE VALIDACIÓN EJECUTABLE
+
+Cada regla funcional relevante debe convertirse en una validación ejecutable.
+
+Una validación ejecutable debe expresar:
+ACCIÓN + OBJETO/DATO + CRITERIO + RESULTADO ESPERADO.
+
+Ejemplo insuficiente:
+“Validar Pesos Reales.”
+
+Ejemplo correcto:
+“Comparar los valores presentados para los productos base en la tabla Pesos Reales contra la parametrización de distribución de pesos de coberturas básicas definida en CU-337.”
+
+Expected:
+“Los valores presentados para cada producto y cobertura corresponden a los pesos parametrizados en CU-337.”
+
+## 30. DESCOMPOSICIÓN DE STEPS
+
+Crear Steps suficientes para ejecutar y evidenciar cada comportamiento funcional relevante.
+
+No crear un Step genérico para cubrir varias reglas independientes cuando eso impida comprobarlas individualmente.
+
+Cuando exista una lista extensa, puede validarse en un Step siempre que el Expected conserve explícitamente los elementos y el orden definido.
+
+Cuando exista una fórmula, crear un Step que permita verificar la fórmula y otro, cuando sea necesario, que permita comprobar el resultado.
+
+Cuando exista una homologación, separar como mínimo:
+- identificación de la agrupación o condición;
+- identificación del elemento homologado;
+- validación del resultado asignado.
+
+## 31. MATRIZ INTERNA DE COBERTURA
+
+Antes de finalizar, comprobar internamente que cada elemento relevante del CU tenga cobertura en al menos uno de estos lugares:
+- Description.
+- Action.
+- Expected.
+- Precondiciones.
+- Resultado esperado.
+
+Si una regla relevante no tiene cobertura, el CP es inválido y debe regenerarse.
+
+## 32. EJEMPLO DE PROFUNDIDAD ESPERADA
+
+Para un CU que defina Pesos Reales, productos, coberturas, parametrización y homologación, NO generar solamente:
+“Validar la tabla Pesos Reales y la homologación de productos.”
+
+Debe desarrollarse el comportamiento incluyendo las coberturas, productos, orden, fuente de parametrización, criterio de agrupación, producto base de referencia y resultado de homologación cuando esos elementos estén definidos en la fuente.
+
+Para un CU que defina Pesos Ajustados, debe conservarse la condición de cobertura no incluida, la fórmula de recálculo, las coberturas disponibles y la validación del total del 100 %, cuando estén definidas en la fuente.
+
+## 33. CONTROL DE CALIDAD DE PROFUNDIDAD
+
+Antes de entregar cada CP responder internamente:
+- ¿Todas las reglas funcionales explícitas están cubiertas?
+- ¿Se conservaron listas importantes?
+- ¿Se conservaron órdenes importantes?
+- ¿Se conservaron fórmulas?
+- ¿Se conservaron condiciones y excepciones?
+- ¿Se usaron las fuentes referenciadas?
+- ¿Cada comportamiento diferenciado está separado cuando corresponde?
+- ¿Los Steps permiten ejecutar la prueba sin interpretar el CU?
+- ¿La Description tiene suficiente detalle para comprender el objetivo y las reglas principales?
+
+Si alguna respuesta es NO, regenerar el CP antes de entregarlo.

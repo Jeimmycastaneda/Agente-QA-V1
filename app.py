@@ -851,7 +851,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V48-ESTABLE"
+APP_VERSION = "V49-ESTABLE-PROFUNDIDAD"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1336,7 +1336,7 @@ def extract_source(uploaded_file):
 
 
 # ============================================================
-# PROMPT EXISTENTE — SE CONSERVA SIN CAMBIOS
+# PROMPT QA V34 — profundidad funcional, formato y reglas vigentes
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_prompt():
