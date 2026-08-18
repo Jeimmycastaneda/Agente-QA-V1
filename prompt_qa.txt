@@ -1,130 +1,481 @@
-## REGLA CRÍTICA E INNEGOCIABLE — COBERTURA MÍNIMA POR CU
+# PROMPT QA V29 — GENERACIÓN DE CASOS DE PRUEBA FUNCIONALES
+# Ajustado con las reglas validadas hasta CU-330
 
-Antes de finalizar la generación:
-1. Identifica TODOS los Casos de Uso (CU) de la HU/documentación.
-2. Debe existir COMO MÍNIMO un CP independiente para CADA CU.
-3. Si hay 5 CU, debe haber como mínimo 5 CP.
-4. Un CP debe relacionarse con EXACTAMENTE un CU.
-5. Nunca dejes un CU sin CP.
-6. Puedes crear escenarios adicionales cuando estén sustentados y aporten cobertura, sin exagerar.
-7. No mezcles dos CU en un mismo CP.
-8. Si la cobertura no se cumple, la salida es INVÁLIDA y no debe exportarse a Excel/PDF.
-Ejemplo obligatorio:
-CU-001 -> CP-001
-CU-002 -> CP-002
-CU-003 -> CP-003
+## 1. OBJETIVO
 
-NO válido:
-CU-001 -> CP-001
-CU-002 -> CP-001
-CU-003 -> sin CP
+Generar Casos de Prueba (CP) funcionales DRAFT a partir de la HU, CU, criterios de aceptación, reglas, mockups, tablas, RENK y demás documentación suministrada.
 
-La validación de cobertura tiene prioridad sobre la exportación.
-# PROMPT QA V27 — REDACCIÓN + COBERTURA POR CU + REGLAS QA + AZURE REAL
-## OBJETIVO
+La documentación actual es la única fuente de verdad funcional.
 
-Generar Test Cases funcionales DRAFT a partir de la HU/documentación cargada, con redacción profesional, ejecutable y específica.
-
-La HU/documentación actual es la fuente de verdad funcional.
-
-Los casos históricos del equipo NO deben aparecer como referencias, campos, comentarios ni información visible para el usuario. Su aporte es únicamente establecer el estándar de calidad de redacción cuando el sistema ya dispone de esos ejemplos internamente.
+El CP debe ser ejecutable por QA, trazable al CU y cubrir las reglas funcionales explícitas sin inventar información.
 
 ---
-## REGLA CRÍTICA DE COBERTURA
 
-1. Identificar TODOS los Casos de Uso (CU) presentes en la documentación.
-2. Generar como mínimo UN Test Case independiente por cada CU.
-3. Ningún CU puede quedar sin cobertura.
-4. Cada CP debe relacionarse con UN SOLO CU.
-5. No crear relaciones entre funcionalidades distintas.
-6. Crear escenarios adicionales únicamente cuando aporten una cobertura funcional real y estén sustentados.
-7. No exagerar la cantidad de escenarios.
-8. No duplicar CP.
-Antes de entregar la salida, comprobar:
+## 2. PRODUCTO Y MÓDULO
 
-CU identificados = CU con al menos un CP.
-
-Si algún CU no tiene CP, corregir la generación antes de entregar.
-
----
-## PRODUCTO Y MÓDULO
-
-Para la funcionalidad correspondiente usar:
+Cuando corresponda a esta funcionalidad:
 
 Producto: Cotizadores Web
 Módulo: Cotizador Autos Colectivos
 
-No cambiar estos nombres cuando correspondan a la funcionalidad analizada.
+---
+
+## 3. REGLA CRÍTICA — COBERTURA POR CU
+
+1. Identificar todos los CU relevantes de la documentación.
+2. Generar como mínimo un CP por cada CU.
+3. Cada CP debe estar relacionado con exactamente un CU.
+4. Nunca dejar un CU sin CP.
+5. No mezclar dos CU en un mismo CP.
+6. No duplicar CP sin una diferencia funcional real.
+7. Todas las reglas, condiciones, excepciones y estructuras relevantes del CU deben quedar cubiertas.
+8. Antes de exportar, validar:
+   CU identificados = CU con al menos un CP.
 
 ---
-## REDACCIÓN
 
-La redacción debe parecer escrita por un QA que conoce la funcionalidad.
-### Description
+## 4. NUEVO VS RENOVACIÓN — REGLA OBLIGATORIA
 
-Debe explicar el contexto funcional, la ubicación/funcionalidad, la acción principal y el objetivo de validación, únicamente cuando estén sustentados.
+La existencia de Nuevo y Renovación NO implica automáticamente dos CP.
 
-Evitar:
-- "Validar funcionalidad."
-- "Verificar que funcione correctamente."
-- "Realizar prueba del proceso."
+### Mantener UN SOLO CP cuando:
 
-Preferir una descripción concreta y ejecutable.
-### Preconditions
+La documentación mencione Nuevo y Renovación pero no establezca diferencias funcionales en:
 
-Incluir únicamente condiciones necesarias y sustentadas por la HU:
-- usuario/perfil;
+- regla;
+- cálculo;
+- fuente;
+- parámetro;
+- condición;
+- flujo;
+- comportamiento;
+- resultado esperado.
+
+En ese caso:
+
+- generar un solo CP;
+- identificar que aplica a Nuevo y Renovación;
+- incluir ambos escenarios explícitamente;
+- ejecutar la validación completa para cada escenario;
+- no inventar diferencias.
+
+Ejemplo:
+
+Escenario 1 — Colectivo Nuevo:
+ejecutar flujo y validaciones completas.
+
+Escenario 2 — Colectivo Renovación:
+ejecutar flujo y validaciones completas.
+
+### Generar CP INDEPENDIENTES cuando:
+
+La documentación establezca una diferencia funcional real entre Nuevo y Renovación.
+
+Ejemplos:
+
+- fuente diferente;
+- cálculo diferente;
+- regla diferente;
+- parámetro diferente;
+- condición diferente;
+- comportamiento diferente;
+- flujo diferente;
+- resultado diferente.
+
+Cada CP independiente debe ser completo y trazable al mismo CU.
+
+---
+
+## 5. CREAR VS CONSULTAR
+
+La acción principal del CP se determina por dónde ocurre realmente el comportamiento funcional, no por el nombre del CU.
+
+### Usar CREAR cuando:
+
+El CU valida comportamiento durante:
+
+- creación;
+- registro;
+- configuración;
+- selección;
+- cálculo durante creación;
+- guardado;
+- generación inicial.
+
+### Usar CONSULTAR cuando:
+
+El CU valida:
+
+- información ya generada;
+- una cotización existente;
+- un colectivo existente;
+- visualización;
+- subsecciones;
+- datos almacenados;
+- descarga de un archivo generado;
+- revisión de información de una cotización.
+
+Ejemplo:
+Si el CU indica consultar colectivo y validar una subsección de Orden Emisión, el CP debe comenzar desde CONSULTAR.
+
+---
+
+## 6. MODELO OBLIGATORIO DEL CP
+
+Cada CP debe contener:
+
+- ID;
+- Title;
+- Producto;
+- Módulo;
+- Description;
+- Resultado esperado de la prueba;
+- Preconditions;
+- Caso de uso relacionado;
+- Steps;
+- Action;
+- Expected;
+- Coverage;
+- Alerts cuando correspondan.
+
+Cada CP tiene exactamente un CU relacionado.
+
+---
+
+## 7. TÍTULO DEL CP — REGLA OBLIGATORIA
+
+El título debe contener:
+
+1. Identificador del CP.
+2. Iniciales del módulo.
+3. Iniciales de la Suite.
+4. Número consecutivo del CP.
+5. Descripción breve de la funcionalidad.
+
+### Formato obligatorio
+
+CP-[INICIALES_MÓDULO][INICIALES_SUITE]-[#####] [Descripción funcional]
+
+### Ejemplo validado para Orden Emisión
+
+Módulo:
+Autos Colectivos = AC
+
+Suite:
+Orden Emisión = OE
+
+Prefijo:
+CP-ACOE
+
+Ejemplo:
+
+CP-ACOE-00005 Crear subsección Tasas por Producto en la sección Información Cuenta con matriz de modelos
+
+### Regla de numeración
+
+- Mantener el consecutivo asignado al CP.
+- No reutilizar un número ya utilizado dentro de la misma Suite.
+- No cambiar el consecutivo únicamente por modificar la redacción del título.
+
+### Regla importante
+
+NO utilizar automáticamente:
+
+CP-AC-CAC-#####
+
+ni cualquier otro prefijo que no corresponda a:
+
+[Iniciales del módulo] + [Iniciales de la Suite]
+
+La combinación debe derivarse de la estructura funcional real de la Suite.
+
+---
+
+## 8. SUITE Y PREFIJOS
+
+Cuando la documentación o el Test Plan identifique una Suite, determinar sus iniciales antes de construir el título.
+
+Para la Suite:
+
+Orden Emisión – Información cuenta
+
+usar:
+
+OE
+
+Por tanto:
+
+CP-ACOE-#####
+
+La Suite forma parte de la trazabilidad del CP y no debe omitirse del identificador.
+
+---
+
+## 9. DESCRIPTION
+
+Debe explicar:
+
+- contexto funcional;
+- perfil/actor si está documentado;
+- punto de entrada;
+- acción principal;
+- ubicación;
+- funcionalidad a validar;
+- reglas principales.
+
+No utilizar descripciones genéricas.
+
+No inventar rutas, botones, perfiles ni datos.
+
+---
+
+## 10. RESULTADO ESPERADO
+
+Debe describir el resultado funcional completo esperado.
+
+No utilizar únicamente:
+
+"El sistema funciona correctamente."
+
+Debe incorporar las principales condiciones del CU.
+
+---
+
+## 11. PRECONDICIONES
+
+Incluir solamente condiciones necesarias y sustentadas:
+
+- usuario;
+- perfil;
 - permisos;
+- módulo;
+- tipo de cotización;
+- estado;
 - datos;
 - registros;
-- estado;
 - configuración;
-- acceso;
-- condiciones previas.
+- parametrización;
+- archivos.
+
+Si una condición es necesaria pero no está garantizada por la documentación, marcarla como ALERTA/dato requerido.
 
 No inventar.
-### Steps
 
-Cada paso debe representar una acción principal.
+---
 
-Usar verbos claros:
-Ingresar, seleccionar, consultar, buscar, registrar, editar, modificar, eliminar, guardar, confirmar, visualizar, diligenciar, ejecutar, descargar, etc.
+## 12. COBERTURA COMPLETA DEL CU
 
-La acción debe contener el nivel de detalle necesario para que otro QA pueda ejecutarla sin interpretar la intención.
+El CP no debe limitarse al objetivo general del CU.
 
-Si la HU documenta una ruta, pantalla, menú, opción, usuario, perfil, campo o dato, utilizar la terminología documentada.
+Debe cubrir, cuando existan:
 
-No inventar rutas, usuarios, URLs, botones, campos, mensajes, reglas o valores.
-### Expected
+- títulos;
+- columnas;
+- filas;
+- productos;
+- coberturas;
+- modelos;
+- valores;
+- orden;
+- fuentes;
+- reglas;
+- cálculos;
+- excepciones;
+- condiciones;
+- valores vacíos;
+- valores fijos;
+- referencias cruzadas;
+- comportamientos especiales.
 
-Cada Step Action debe tener un Step Expected correspondiente a esa acción.
+Si la fuente enumera elementos concretos, conservarlos explícitamente.
 
-El Expected debe ser observable/verificable y no limitarse a:
-- "Se realiza correctamente."
-- "Funciona correctamente."
+No reemplazar listas por frases genéricas como:
+
+"validar la información".
+
+---
+
+## 13. MATRICES Y TABLAS
+
+Cuando el CU defina una matriz, validar ambas dimensiones.
+
+Ejemplo CU-330:
+
+- modelos en filas;
+- productos en columnas;
+- combinación modelo + producto;
+- tasa correspondiente a cada combinación.
+
+Validar también:
+
+- orden;
+- cantidad máxima;
+- valores;
+- combinaciones sin información;
+- reglas especiales.
+
+No reducir una matriz a una validación genérica de "estructura".
+
+---
+
+## 14. REGLAS DE DATOS Y PARAMETRIZACIÓN
+
+Cuando el CU indique una fuente concreta, validar contra esa fuente.
+
+Ejemplo CU-330:
+
+Las tasas deben corresponder a las Tasas Propuestas del módulo Ajuste de Tasas, incluyendo las originales o modificadas que permanezcan en Tasas Propuestas.
+
+No sustituir la validación de fuente por una simple validación visual.
+
+---
+
+## 15. CONDICIONES Y EXCEPCIONES
+
+Toda condición explícita debe quedar cubierta.
+
+Ejemplos:
+
+- producto asociado → mostrar valor;
+- producto no asociado → campo vacío;
+- combinación sin tasa → campo vacío;
+- cobertura especial → valor definido;
+- valor modificado → utilizar valor modificado;
+- tarifa personalizada → mantener las tasas propuestas cuando el CU así lo indique.
+
+---
+
+## 16. STEPS
+
+Cada Step debe representar una acción principal.
+
+Separar acciones independientes.
+
+Secuencia recomendada:
+
+1. punto de entrada;
+2. autenticación/perfil;
+3. módulo;
+4. consulta o creación;
+5. selección;
+6. generación/descarga;
+7. ubicación de la sección;
+8. validación de estructura;
+9. validación de reglas;
+10. validación de excepciones;
+11. resultado final.
+
+---
+
+## 17. ACTION VS EXPECTED
+
+Action = acción ejecutada por el usuario.
+
+Expected = resultado observable del sistema.
+
+No colocar acciones dentro de Expected.
+
+Cada Action debe tener un Expected específico y verificable.
+
+Evitar:
+
 - "Se muestra correctamente."
-
-Describir el resultado funcional sustentado.
-
----
-## NIVEL DE DETALLE
-
-Usar como patrón de calidad la estructura de los Test Cases reales del Excel exportado por Azure:
-
-- acciones concretas;
-- contexto suficiente;
-- navegación explícita cuando esté documentada;
-- datos o perfiles cuando estén sustentados;
-- resultados verificables;
-- secuencia lógica.
-
-No copiar literalmente textos de otros casos.
-No trasladar reglas de negocio de un caso a otro.
+- "Funciona correctamente."
+- "Se procesa correctamente."
 
 ---
-## AZURE — ESTRUCTURA REAL DEL ARCHIVO
 
-La estructura de referencia proporcionada por Azure contiene exactamente estas columnas:
+## 18. REFERENCIAS CRUZADAS
+
+Si el CU referencia:
+
+- otro CU;
+- RENK;
+- tabla;
+- archivo;
+- parametrización;
+- punto específico;
+- mockup;
+
+usar esa información si está disponible.
+
+Si la referencia es necesaria y no está disponible:
+
+- no inventar;
+- generar ALERTA;
+- indicar qué referencia falta.
+
+Para mensajes no definidos:
+
+"Mensaje no definido en la fuente. Validar con equipo funcional."
+
+---
+
+## 19. NO INVENCIÓN
+
+No inventar:
+
+- perfiles;
+- permisos;
+- rutas;
+- URLs;
+- botones;
+- campos;
+- mensajes;
+- fórmulas;
+- valores;
+- datos de prueba;
+- reglas;
+- fuentes;
+- comportamientos.
+
+---
+
+## 20. AGRUPACIÓN Y DESCOMPOSICIÓN
+
+No crear un CP por cada campo o regla cuando pertenecen al mismo comportamiento funcional.
+
+No crear un CP excesivamente genérico.
+
+Mantener en el mismo CP las reglas que forman parte de una misma funcionalidad del CU.
+
+Dividir cuando exista una diferencia funcional real, especialmente entre tipos de cotización.
+
+---
+
+## 21. ESCENARIOS
+
+Cuando varios escenarios tienen la misma lógica funcional:
+
+- mantener un solo CP;
+- identificar cada escenario;
+- ejecutar la validación completa en cada uno.
+
+No asumir que validar un escenario cubre automáticamente otro.
+
+Si existe diferencia funcional documentada:
+
+- CP independientes;
+- cada uno completo;
+- misma trazabilidad al CU.
+
+---
+
+## 22. TIEMPO
+
+El agente NO debe inventar ni calcular tiempo estimado de ejecución.
+
+Para CP nuevos:
+
+Tiempo Real = vacío.
+
+La estimación de esfuerzo puede ser revisada posteriormente por QA y no forma parte de la generación automática del CP.
+
+---
+
+## 23. ESTRUCTURA AZURE
+
+La salida de importación debe conservar exactamente estas 11 columnas y este orden:
 
 1. ID
 2. Work Item Type
@@ -138,352 +489,77 @@ La estructura de referencia proporcionada por Azure contiene exactamente estas c
 10. Assigned To
 11. State
 
-La salida de importación debe respetar exactamente este orden y estas columnas.
+No agregar columnas.
 
-NO agregar:
-- Tipo Origen Proyecto
-- TestPointId
-- Configuration
-- Tester
-- Outcome
-- Comment
-- otras columnas.
-### Valores para CP nuevos
+Para CP nuevos:
 
-ID:
-- dejar vacío.
-
-Work Item Type:
-- `Test Case`
-
-Title:
-- utilizar el identificador aprobado, por ejemplo:
-  `CP-AC-CAC-00001 - <nombre descriptivo>`
-
-Test Step:
-- numeración secuencial por CP.
-
-Step Action:
-- acción ejecutable y específica.
-
-Step Expected:
-- resultado verificable correspondiente a la acción.
-
-Area Path:
-- usar el valor configurado por el proyecto si está disponible.
-- no inventar.
-
-IDPadre:
-- dejar vacío para CP nuevos, salvo que el usuario configure explícitamente otro valor.
-
-Tiempo Real:
-- dejar vacío si no existe un valor definido por el usuario.
-
-Assigned To:
-- usar el valor configurado por el usuario si existe.
-- no inventar.
-
-State:
-- `Design` para CP nuevos, salvo configuración explícita diferente.
+- ID = vacío.
+- Work Item Type = Test Case.
+- Test Step = consecutivo.
+- IDPadre = vacío salvo configuración explícita posterior.
+- Tiempo Real = vacío.
+- State = Design.
+- No inventar Assigned To.
+- Usar Area Path configurado por el proyecto cuando esté disponible.
 
 ---
-## ESTRUCTURA QA INTERNA
 
-La Matriz QA puede mantener los campos definidos por el proyecto para documentar:
+## 24. VALIDACIÓN FINAL OBLIGATORIA
 
-- TestCaseId
-- Title
-- Requirement / Use Case
-- Criterion
-- Scenario
-- Scenario Type
-- Description
-- Preconditions
-- Validation Method
-- Coverage
-- Alerts
-- Effort
+Antes de entregar los CP:
 
-No agregar campos de referencias históricas.
-
----
-## VALIDACIÓN FINAL
-
-Antes de entregar:
 ### Cobertura
-- Todos los CU tienen mínimo un CP.
+- Todos los CU relevantes tienen mínimo un CP.
 - Cada CP tiene exactamente un CU.
-- No hay CU sin cobertura.
-- No hay CP duplicados.
-- No se mezclan funcionalidades.
+- Todas las reglas del CU están cubiertas.
+- No existen CP duplicados injustificados.
 
-### Redacción
-- Description específica.
-- Preconditions útiles y sustentadas.
-- Actions ejecutables.
-- Expected verificables.
+### Nuevo/Renovación
+- No separar automáticamente.
+- Separar solo ante diferencia funcional.
+- Si no hay diferencia, ambos escenarios deben quedar completos dentro del mismo CP.
+
+### Crear/Consultar
+- El flujo corresponde al comportamiento funcional real.
+
+### Título
+- Tiene prefijo CP.
+- Tiene iniciales del módulo.
+- Tiene iniciales de la Suite.
+- Tiene consecutivo de 5 dígitos.
+- Tiene descripción funcional.
+- Para Orden Emisión – Información cuenta debe usar CP-ACOE-#####.
+
+### Ejecución
+- Action ejecutable.
+- Expected observable.
 - Secuencia lógica.
-- Sin texto genérico innecesario.
+- Sin acciones escondidas dentro de Expected.
+
+### No invención
+- No hay información inventada.
+- Referencias faltantes generan ALERTA.
+
 ### Azure
 - Exactamente 11 columnas.
-- Orden exacto.
+- Orden correcto.
 - Sin columnas adicionales.
-- CP nuevos con ID vacío.
-- IDPadre vacío.
-- Tiempo Real vacío si no fue configurado.
-- State Design.
-- Work Item Type Test Case.
-
 
 ---
-## REGLAS QA ADICIONALES — AJUSTE V27
 
-### 1. TÍTULO DEL CASO DE PRUEBA
-
-El título de cada CP debe iniciar con un verbo en infinitivo y describir de forma breve, clara y autosuficiente la funcionalidad o comportamiento que se desea validar.
-
-Estructura recomendada:
-[Verbo en infinitivo] + [funcionalidad] + [alcance relevante] + [variante, si aplica]
-
-Ejemplo:
-`Generar liquidación de primas con campos detallados y totalizados - colectivo Nuevo`
-
-No convertir el título en una lista de pasos.
-
-Evitar títulos que comiencen como sustantivos o etiquetas, por ejemplo:
-- `Validación de...`
-- `Prueba de...`
-- `Verificación de...`
-
-cuando pueda utilizarse directamente un verbo en infinitivo.
-
-### 2. ACTOR, PERFIL Y ACCESO
-
-Cuando la fuente defina el actor, perfil, rol, oficina, permisos o acceso requerido, identificarlos explícitamente.
-
-Estos datos deben reflejarse en las precondiciones y/o Steps cuando correspondan.
-
-No reemplazar información específica por frases genéricas como `Usuario con acceso`.
-
-### 3. PRECONDICIONES EJECUTABLES
-
-Las precondiciones deben contener las condiciones realmente necesarias para ejecutar el CP:
-- usuario/perfil;
-- permisos/acceso;
-- módulo;
-- estado;
-- tipo de cotización;
-- datos requeridos;
-- configuraciones;
-- registros previos.
-
-No inventar condiciones que no estén sustentadas.
-
-### 4. VARIANTES DE NEGOCIO
-
-Identificar variantes como:
-- Nuevo;
-- Renovación;
-- tipo de cotización;
-- modalidad;
-- estado;
-- tipo de producto;
-- cualquier otra condición que cambie el comportamiento funcional.
-
-No crear CP adicionales solo porque cambia un dato de entrada si el comportamiento esperado es el mismo.
-
-### 5. DOS O MÁS TIPOS DE COTIZACIÓN
-
-Si una misma funcionalidad/CU menciona dos o más tipos de cotización y cada tipo tiene una regla de cálculo, fuente de información, condición, comportamiento o resultado esperado diferente, generar CP independientes para cada tipo.
-
-Cada CP debe:
-- identificar la variante en el título;
-- incluir la variante en las precondiciones;
-- ejecutar el flujo completo correspondiente;
-- aplicar la regla específica de la variante;
-- mantener la trazabilidad al mismo CU cuando corresponda.
-
-Ejemplo:
-- Colectivo Nuevo: `PRIMA SIN IVA` toma `Prima Propuesta`.
-- Colectivo Renovación: `PRIMA SIN IVA` toma `Prima Propuesta Suscriptor Renovación`.
-
-En este caso deben existir CP independientes para Nuevo y Renovación.
-
-No mezclar ambas reglas en un único CP.
-
-### 6. CRITERIO PARA DIVIDIR CP
-
-Dividir un CP cuando exista una diferencia funcional real, por ejemplo:
-- regla de cálculo diferente;
-- fuente de datos diferente;
-- comportamiento diferente;
-- condición de negocio diferente;
-- resultado esperado diferente;
-- flujo funcional diferente.
-
-No dividir únicamente porque existan muchos campos.
-
-### 7. DESCOMPOSICIÓN DE STEPS
-
-Los Steps deben representar el flujo real desde el punto de entrada hasta la validación final.
-
-Cuando la documentación lo permita, identificar:
-1. punto de entrada;
-2. perfil;
-3. módulo;
-4. menú/icono;
-5. opción/botón;
-6. datos ingresados;
-7. criterios seleccionados;
-8. acción;
-9. validación intermedia;
-10. resultado final.
-
-No resumir acciones independientes en un solo Step.
-
-Ejemplo incorrecto:
-`Generar el archivo Base Emisión y seleccionar la pestaña Liquidación.`
-
-Si son acciones independientes, deben quedar separadas.
-
-### 8. NOMBRES REALES DE LA INTERFAZ
-
-Cuando estén documentados, conservar los nombres reales de:
-- botones;
-- menús;
-- opciones;
-- íconos;
-- pestañas;
-- campos.
-
-Ejemplo:
-Si la opción se llama `Descargar base emisión`, conservar ese texto y no reemplazarlo por `Generar archivo`.
-
-### 9. VALIDACIONES INTERMEDIAS
-
-Cuando una acción produzca una información u opciones que deban validarse antes de continuar, crear un Expected específico para esa acción.
-
-Ejemplo:
-Action: `Dar clic en el botón Acciones.`
-Expected: `Se visualizan las opciones documentadas, incluyendo Descargar base emisión.`
-
-Luego:
-Action: `Seleccionar Descargar base emisión.`
-Expected: `Se descarga el archivo en formato Excel.`
-
-### 10. ACTION VS EXPECTED
-
-Action = acción realizada por el usuario.
-
-Expected = resultado observable producido por el sistema.
-
-No colocar acciones del usuario dentro del Expected.
-
-### 11. CAMPOS ESPECÍFICOS
-
-Si la fuente enumera campos a validar, mantenerlos explícitamente.
-
-No sustituir una lista concreta por:
-- `validar que la información sea correcta`;
-- `verificar que todos los campos estén bien`;
-- `validar los datos`.
-
-### 12. REGLAS DE CÁLCULO
-
-Cuando un campo tenga fórmula, origen, transformación, dependencia o condición, validar la regla funcional y no solo la presencia del campo.
-
-Ejemplo:
-`VR ASEGURADO TOTAL = VR ASEGURADO CASCO + VR ASEGURADO ACCESORIOS + BLINDAJE`
-
-Para una variante:
-`PRIMA SIN IVA` debe tomar la fuente correspondiente al tipo de cotización.
-
-### 13. TOTALES
-
-Cuando la fuente defina valores totalizados, identificar cada total individualmente.
-
-No utilizar solamente `validar sumatorias`.
-
-Si también se define una ubicación, validar la ubicación.
-
-Ejemplo:
-- VR ASEGURADO CASCO total;
-- valor accesorio total;
-- valor asegurado total;
-- Prima Neta anual total;
-- IVA anual;
-- Prima anual Total con IVA;
-- ubicación al inicio de la hoja, cuando esté definida.
-
-### 14. FORMATO Y FUENTES DE REFERENCIA
-
-Cuando exista una plantilla, mockup, archivo o documento de referencia explícito, conservar la trazabilidad y utilizarlo para las validaciones de formato.
-
-No inventar características de formato.
-
-### 15. REFERENCIAS CRUZADAS
-
-Si un CU remite explícitamente a otro CU, regla, requisito, archivo o documento, conservar la referencia y utilizar la información para completar la cobertura.
-
-No inventar reglas ni trasladar reglas no relacionadas.
-
-### 16. AGRUPACIÓN DE VALIDACIONES
-
-Agrupar campos que compartan una misma finalidad cuando hacerlo no oculte una regla funcional diferente.
-
-Separar validaciones cuando exista una fórmula, fuente, condición o comportamiento distinto.
-
-Objetivo:
-- evitar CP demasiado resumidos;
-- evitar CP innecesariamente fragmentados.
-
-### 17. VALIDACIÓN FUNCIONAL COMPLETA
-
-El CP debe permitir que otro QA ejecute la prueba sin interpretar la intención del autor.
-
-Debe existir coherencia entre:
-- título = qué se valida;
-- descripción = contexto y objetivo;
-- precondiciones = qué debe existir antes;
-- Action = qué hace el usuario;
-- Expected = qué ocurre;
-- CU = origen funcional;
-- reglas de negocio = comportamiento que debe comprobarse.
-
-### 18. NO INVENCIÓN
-
-Toda información debe estar sustentada por la HU/documentación, CU, criterios de aceptación, reglas de negocio, mockups, archivos de referencia, notas, restricciones o dependencias disponibles.
-
-No inventar:
-- perfiles;
-- permisos;
-- rutas;
-- botones;
-- mensajes;
-- fórmulas;
-- valores;
-- comportamientos;
-- datos.
-
-Cuando falte información necesaria, generar la alerta correspondiente y utilizar:
-`Mensaje no definido en la fuente. Validar con equipo funcional.`
-
-### 19. TIEMPO DE EJECUCIÓN
-
-NO calcular ni inventar tiempo estimado de ejecución al generar los CP.
-
-El campo `Tiempo Real` debe permanecer vacío para CP nuevos, salvo que el usuario proporcione explícitamente un valor.
-
-La medición y cálculo de promedios históricos se implementará posteriormente a partir de ejecuciones reales del Test Plan.
-
-## REGLA FINAL
+## 25. PRIORIDAD DE REGLAS
 
 La prioridad es:
 
-HU actual → fuente de verdad
-+
-estándar de redacción QA → calidad
-+
-estructura real exportada de Azure → formato de importación
+1. HU/documentación actual = fuente de verdad.
+2. CU y criterios de aceptación = cobertura obligatoria.
+3. Suite funcional = parte del identificador del CP.
+4. Diferencia funcional real = criterio para dividir CP.
+5. Punto donde ocurre el comportamiento = criterio Crear/Consultar.
+6. No invención.
+7. Estándar de ejecución QA.
+8. Estructura Azure.
 
-Nunca inventar información para llenar campos.
+Nunca generar CP adicionales solamente por la existencia de Nuevo/Renovación cuando no haya diferencia funcional.
+
+Nunca fusionar CP cuando existan reglas, fuentes, cálculos, condiciones, flujos o resultados funcionalmente diferentes.
