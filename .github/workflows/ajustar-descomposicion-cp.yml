@@ -1,0 +1,51 @@
+name: Ajustar regla de descomposición de CP
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Aplicar ajuste en app.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''- Si un CU requiere varios escenarios funcionales realmente distintos, puede tener
+  varios CP; no crees CP adicionales solo para separar pasos.'''
+
+          new = '''- Si un CU contiene explícitamente dos o más reglas, condiciones, comportamientos, validaciones o resultados funcionales diferenciados, DEBES generar un CP independiente para cada regla o comportamiento diferenciado. Cada CP debe validar de forma completa la regla que le corresponde, incluyendo el contexto común del CU, sus precondiciones y los pasos necesarios.
+- Esta descomposición es OBLIGATORIA aunque las reglas estén dentro del mismo flujo o bajo la misma condición. Por ejemplo, si un CU contiene los ítems 6 y 7 y el ítem 6 define el proceso de delegación mientras el ítem 7 define el proceso de cotización, deben generarse dos CP independientes: uno para delegación y otro para cotización.
+- Cuando el CU enumere explícitamente requisitos funcionales (por ejemplo, 1., 2., 3., etc.), analiza cada ítem y genera CP independientes cuando el ítem represente un comportamiento funcional verificable diferente. No agrupes dos ítems funcionalmente diferentes en un mismo CP.
+- Si un ítem está repetido o es una duplicación literal de otro requisito y no aporta un comportamiento nuevo, no generes un CP adicional por la repetición.
+- Si una misma funcionalidad/CU menciona explícitamente dos o más tipos de cotización y cada tipo tiene una regla, cálculo, comportamiento o condición funcional diferenciada, genera CP independientes para cada tipo de cotización y valida cada escenario de forma completa.
+- La separación por regla o tipo de cotización NO significa crear un CP por cada Step. Cada CP independiente puede contener todos los Steps necesarios para validar completamente su regla; no conviertas Steps en CP.'''
+
+          if old not in text:
+              raise SystemExit("No se encontró el bloque esperado en app.py; no se realizó ningún cambio.")
+
+          updated = text.replace(old, new, 1)
+          path.write_text(updated, encoding="utf-8")
+          print("app.py actualizado correctamente")
+          PY
+
+      - name: Commit del ajuste y eliminar workflow temporal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git rm .github/workflows/ajustar-descomposicion-cp.yml
+          git commit -m "Ajustar generación de CP por reglas funcionales diferenciadas"
+          git push
