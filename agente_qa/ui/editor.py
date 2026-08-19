@@ -22,7 +22,7 @@ def _prepare_case(test_case):
                 rows.append({
                     "Steps": i,
                     "Action": _text(step.get("Action")),
-                    "Expected": _text(step.get("Expected value")),
+                    "Expected": _text(step.get("Expected value"), step.get("Expected")),
                 })
     draft["_steps_df"] = pd.DataFrame(rows or [{"Steps": 1, "Action": "", "Expected": ""}])
     return draft
@@ -52,6 +52,7 @@ def render_azure_style_editor(selected_case, selected_index):
     if state_key not in st.session_state:
         st.session_state[state_key] = _prepare_case(selected_case)
     draft = st.session_state[state_key]
+
     st.markdown("### Description")
     col1, col2 = st.columns(2)
     with col1:
@@ -61,6 +62,7 @@ def render_azure_style_editor(selected_case, selected_index):
     draft["Title"] = st.text_input("Título", value=_text(draft.get("Title")), key=f"editor_title_{selected_index}")
     draft["Description"] = st.text_area("Descripción", value=_text(draft.get("Description")), height=220, key=f"editor_description_{selected_index}")
     draft["Expected Result"] = st.text_area("Resultado esperado de la prueba", value=_text(draft.get("Expected Result")), height=130, key=f"editor_expected_{selected_index}")
+
     st.markdown("#### Precondiciones")
     preconditions = draft["_preconditions"]
     for i, value in enumerate(preconditions):
@@ -69,24 +71,33 @@ def render_azure_style_editor(selected_case, selected_index):
         preconditions.append("")
         st.session_state[state_key]["_preconditions"] = preconditions
         st.rerun()
+
     st.markdown("#### Caso de uso relacionado")
     st.caption("Cada Test Case debe estar asociado a un único Caso de Uso.")
     draft["_related_use_case"] = st.text_input("Caso de uso", value=draft["_related_use_case"], key=f"editor_related_{selected_index}")
+
     st.divider()
     st.markdown("### Steps")
     draft["_steps_df"] = st.data_editor(
-        draft["_steps_df"], num_rows="dynamic", use_container_width=True, hide_index=True,
+        draft["_steps_df"],
+        num_rows="dynamic",
+        width="stretch",
+        hide_index=True,
         column_config={
             "Steps": st.column_config.NumberColumn("Steps", min_value=1, step=1, disabled=True),
             "Action": st.column_config.TextColumn("Action", width="large"),
             "Expected": st.column_config.TextColumn("Expected", width="large"),
-        }, key=f"editor_steps_{selected_index}")
+        },
+        key=f"editor_steps_{selected_index}",
+    )
+
     st.divider()
     col_save, col_cancel = st.columns(2)
     with col_save:
-        save = st.button("Guardar cambios", type="primary", use_container_width=True, key=f"editor_save_{selected_index}")
+        save = st.button("Guardar cambios", type="primary", width="stretch", key=f"editor_save_{selected_index}")
     with col_cancel:
-        cancel = st.button("Cancelar", use_container_width=True, key=f"editor_cancel_{selected_index}")
+        cancel = st.button("Cancelar", width="stretch", key=f"editor_cancel_{selected_index}")
+
     if cancel:
         st.session_state[state_key] = _prepare_case(selected_case)
         st.rerun()
@@ -128,4 +139,4 @@ def render_editor_section():
     if render_azure_style_editor(cases[index], index) == "saved":
         st.session_state.excel_data = None
         st.session_state.pdf_data = None
-        st.success("✅ Caso actualizado.")
+        st.success("✅ Caso actualizado. Regenera las exportaciones después de editar.")
