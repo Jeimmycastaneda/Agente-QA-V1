@@ -1,12 +1,9 @@
-"""UI Azure DevOps.
-
-La red HTTP vive en integrations.azure_devops. Esta capa consulta, permite
-seleccionar Plan/Suite/CP y solicita confirmación explícita antes de escribir.
-También conserva las funciones de referencia y eliminación local de main.
-"""
+"""Interfaz Azure DevOps equivalente a main, separada de la capa HTTP."""
 from __future__ import annotations
 
 import os
+import re
+import pandas as pd
 import streamlit as st
 
 from agente_qa.integrations.azure_devops import (
@@ -20,188 +17,298 @@ from agente_qa.integrations.azure_devops import (
     add_parent_relation_to_work_item,
     add_test_cases_to_suite,
 )
-from agente_qa.core.case_management import (
-    calculate_cu_coverage,
-    delete_generated_case,
-    build_reference_preview_case,
-)
+from agente_qa.core.case_management import delete_generated_case, build_reference_preview_case
 from agente_qa.export.excel import create_excel
 from agente_qa.export.pdf import create_pdf
 
 
-def _secret_or_env(secret_name: str, env_name: str | None = None) -> str:
-    env_name = env_name or secret_name
+def _secret(name: str, env_name: str | None = None) -> str:
+    env_name = env_name or name
     try:
-        value = st.secrets.get(secret_name, "")
+        value = st.secrets.get(name, "")
     except Exception:
         value = ""
     return str(value or os.getenv(env_name, "")).strip()
 
 
 def _cfg() -> AzureDevOpsConfig:
-    organization = _secret_or_env("AZURE_DEVOPS_ORG", "AZDO_ORGANIZATION")
-    project = _secret_or_env("AZURE_DEVOPS_PROJECT", "AZDO_PROJECT")
-    pat = _secret_or_env("AZURE_DEVOPS_PAT", "AZDO_PAT")
-    enabled_value = _secret_or_env("AZDO_ENABLED")
-    enabled = enabled_value.lower() in {"1", "true", "yes", "si", "sí"} or bool(pat)
-    return AzureDevOpsConfig(organization=organization, project=project, pat=pat, enabled=enabled)
+    org = _secret("AZURE_DEVOPS_ORG", "AZDO_ORGANIZATION")
+    project = _secret("AZURE_DEVOPS_PROJECT", "AZDO_PROJECT")
+    pat = _secret("AZURE_DEVOPS_PAT", "AZDO_PAT")
+    enabled = _secret("AZDO_ENABLED").lower() in {"1", "true", "yes", "si", "sí"} or bool(pat)
+    return AzureDevOpsConfig(organization=org, project=project, pat=pat, enabled=enabled)
 
 
-def _render_reference_detail(detail: dict):
+def _text(value, default=""):
+    if value is None:
+        return default
+    value = str(value).strip()
+    return value if value else default
+
+
+def _case_title(tc, case_id=""):
+    title = re.sub(r"\s+", " ", _text(tc.get("Title"))).strip()
+    if not title or title.casefold() == _text(case_id).casefold() or re.fullmatch(r"CP-[A-Z0-9_-]+-\d{5}", title, re.I):
+        for candidate in (tc.get("Scenario"), tc.get("Description"), tc.get("Related Use Case")):
+            candidate = re.sub(r"\s+", " ", _text(candidate)).strip()
+            if candidate and candidate.casefold() != _text(case_id).casefold():
+                return candidate
+    return title or f"Caso de prueba {_text(case_id, 'CP')}"
+
+
+def _config_key():
+    return st.session_state.get("qa_settings", {}).get("config_key", "Autos Colectivos")
+
+
+def _rebuild_exports(result):
+    st.session_state.excel_data = create_excel(result, _config_key())
+    st.session_state.pdf_data = create_pdf(result, _config_key(), st.session_state.get("source_name", ""))
+
+
+def _render_reference_detail(detail):
     st.markdown("## 📌 Test Case de referencia")
     st.markdown(
-        f"**ID:** {detail.get('id', '')}  \n"
-        f"**Título:** {detail.get('title', '')}  \n"
-        f"**Estado:** {detail.get('state', '')}  \n"
-        f"**Area Path:** {detail.get('area_path', '')}"
+        f"**ID:** {_text(detail.get('id'))}  \n"
+        f"**Título:** {_text(detail.get('title'))}  \n"
+        f"**Estado:** {_text(detail.get('state'))}  \n"
+        f"**Area Path:** {_text(detail.get('area_path'))}"
     )
     st.markdown("### 📝 Description real de Azure")
     st.write(detail.get("description", "") or "Sin Description")
     st.markdown("### 🧪 Steps reales de Azure")
     steps = detail.get("steps", []) or []
     if steps:
-        st.dataframe(steps, width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(steps), width="stretch", hide_index=True)
     else:
         st.warning("⚠️ El Test Case de referencia no tiene Steps legibles.")
 
 
+def _reference_checks(detail):
+    description = _text(detail.get("description")).lower()
+    steps = detail.get("steps", []) or []
+    return {
+        "Producto dentro de Description": "producto:" in description,
+        "Módulo dentro de Description": "módulo:" in description or "modulo:" in description,
+        "Descripción dentro de Description": "descripción:" in description or "descripcion:" in description,
+        "Resultado esperado dentro de Description": "resultado esperado de la prueba:" in description,
+        "Precondiciones dentro de Description": "precondiciones:" in description,
+        "Caso de uso relacionado dentro de Description": "caso de uso relacionado:" in description,
+        "Steps con Action + Expected": bool(steps) and all(_text(s.get("Action")) and _text(s.get("Expected value")) for s in steps),
+    }
+
+
 def render_azure_section():
     st.divider()
-    st.subheader("🚀 Cargar CP en Azure DevOps")
-    st.caption("La escritura ocurre únicamente después de selección y confirmación explícita.")
+    st.subheader("🚀 Azure DevOps")
+    st.caption("Las consultas son de solo lectura. La escritura ocurre únicamente después de selección y confirmación explícita.")
+    cfg = _cfg()
 
-    if st.button("🔄 Consultar Test Plans", key="azure_refresh_plans"):
+    # ---------------- Referencia: Plan -> Suite -> CP ----------------
+    if st.button("📋 Consultar 10 Test Plans", key="azure_list_test_plans"):
         try:
-            st.session_state.azure_plans = list_test_plans(_cfg(), limit=10)
-            st.session_state.azure_suites = []
+            with st.spinner("Consultando los 10 Test Plans más recientes..."):
+                st.session_state.azure_reference_plans = list_test_plans(cfg, limit=10)
+            st.session_state.azure_reference_suites = []
             st.session_state.azure_reference_cases = []
             st.session_state.azure_reference_detail = None
+            st.session_state.azure_reference_plan_id = None
+            st.session_state.azure_reference_suite_id = None
+            st.success(f"✅ {len(st.session_state.azure_reference_plans)} Test Plan(s) consultados.")
         except Exception as exc:
-            st.error(f"No fue posible consultar Test Plans: {exc}")
+            st.error(f"❌ No se pudieron consultar los Test Plans: {exc}")
 
-    plans = st.session_state.get("azure_plans", [])
-    if not plans:
-        st.info("Consulta los Test Plans para comenzar. La consulta es solo de lectura.")
-        return
+    plans = st.session_state.get("azure_reference_plans", []) or []
+    if plans:
+        plan_labels = [f"{_text(p.get('id'), 'SIN ID')} — {_text(p.get('name'), 'Test Plan sin nombre')}" for p in plans]
+        plan_label = st.selectbox("1️⃣ Test Plan", plan_labels, key="azure_reference_plan_select")
+        plan = plans[plan_labels.index(plan_label)]
+        if st.button("🔎 Consultar Suites", key="azure_reference_get_suites"):
+            try:
+                st.session_state.azure_reference_suites = list_test_suites(plan["id"], cfg)
+                st.session_state.azure_reference_plan_id = plan["id"]
+                st.session_state.azure_reference_cases = []
+                st.session_state.azure_reference_detail = None
+                st.success(f"✅ {len(st.session_state.azure_reference_suites)} Suite(s) encontradas.")
+            except Exception as exc:
+                st.error(f"❌ No se pudieron consultar las Suites: {exc}")
 
-    plan_labels = [f"{p.get('id')} — {p.get('name', 'Sin nombre')}" for p in plans]
-    plan_label = st.selectbox("1️⃣ Test Plan destino", plan_labels, key="azure_plan_select")
-    plan = plans[plan_labels.index(plan_label)]
+    suites = st.session_state.get("azure_reference_suites", []) or []
+    if suites:
+        suite_labels = [f"{_text(s.get('id'), 'SIN ID')} — {_text(s.get('name'), 'Suite sin nombre')}" for s in suites]
+        suite_label = st.selectbox("2️⃣ Suite", suite_labels, key="azure_reference_suite_select")
+        suite = suites[suite_labels.index(suite_label)]
+        if st.button("🔎 Consultar Test Cases", key="azure_reference_get_cases"):
+            try:
+                st.session_state.azure_reference_cases = list_test_cases(plan["id"], suite["id"], cfg)
+                st.session_state.azure_reference_suite_id = suite["id"]
+                st.session_state.azure_reference_detail = None
+                st.success(f"✅ {len(st.session_state.azure_reference_cases)} Test Case(s) encontrados.")
+            except Exception as exc:
+                st.error(f"❌ No se pudieron consultar los Test Cases: {exc}")
 
-    if st.button("📂 Cargar Suites", key="azure_load_suites"):
-        try:
-            st.session_state.azure_suites = list_test_suites(plan["id"], _cfg())
-            st.session_state.azure_reference_cases = []
-            st.session_state.azure_reference_detail = None
-        except Exception as exc:
-            st.error(f"No fue posible consultar las Suites: {exc}")
-
-    suites = st.session_state.get("azure_suites", [])
-    if not suites:
-        return
-
-    suite_labels = [f"{s.get('id')} — {s.get('name', 'Suite sin nombre')}" for s in suites]
-    suite_label = st.selectbox("2️⃣ Suite destino", suite_labels, key="azure_suite_select")
-    suite = suites[suite_labels.index(suite_label)]
-
-    # Referencia Azure: lectura, comparación y preview, sin escritura.
-    st.markdown("### 3️⃣ Test Case de referencia")
-    if st.button("🔎 Consultar Test Cases de la Suite", key="azure_reference_get_cases"):
-        try:
-            cases = list_test_cases(plan["id"], suite["id"], _cfg())
-            st.session_state.azure_reference_cases = cases
-            st.session_state.azure_reference_detail = None
-        except Exception as exc:
-            st.error(f"No se pudieron consultar los Test Cases: {exc}")
-
-    reference_cases = st.session_state.get("azure_reference_cases", [])
+    reference_cases = st.session_state.get("azure_reference_cases", []) or []
     if reference_cases:
-        options = [f"{c.get('id')} — {c.get('title', 'Sin título')}" for c in reference_cases]
-        selected_ref = st.selectbox("Test Case real de Azure", options, key="azure_reference_case_select")
-        ref_case = reference_cases[options.index(selected_ref)]
+        valid = [c for c in reference_cases if _text(c.get("id"))]
+        options = [f"{_text(c.get('id'))} — {_text(c.get('title'), 'Test Case sin título')}" for c in valid]
+        selected_ref = st.selectbox("3️⃣ Test Case de referencia", options, key="azure_reference_case_select")
+        ref = valid[options.index(selected_ref)]
         if st.button("🔬 Consultar y comparar", key="azure_reference_compare"):
             try:
-                st.session_state.azure_reference_detail = get_test_case_detail(ref_case["id"], _cfg())
+                st.session_state.azure_reference_detail = get_test_case_detail(ref["id"], cfg)
             except Exception as exc:
-                st.error(f"No se pudo consultar el Test Case de referencia: {exc}")
+                st.error(f"❌ No se pudo consultar el Test Case: {exc}")
 
-    reference_detail = st.session_state.get("azure_reference_detail")
-    if reference_detail:
-        _render_reference_detail(reference_detail)
-        current_result = st.session_state.get("result_json")
-        if current_result:
-            if st.button("🧩 Generar CP nuevo para revisión funcional", key="azure_prepare_new_cp_preview"):
-                generated = current_result.get("TEST_CASES", []) or []
-                previews = [build_reference_preview_case(reference_detail, tc) for tc in generated]
-                preview_result = dict(current_result)
-                preview_result["TEST_CASES"] = previews
+    detail = st.session_state.get("azure_reference_detail")
+    if detail:
+        _render_reference_detail(detail)
+        checks = _reference_checks(detail)
+        st.markdown("### 🔎 Comparación contra estructura aprobada")
+        st.dataframe(pd.DataFrame([{"Elemento": k, "Cumple": "✅" if v else "⚠️"} for k, v in checks.items()]), width="stretch", hide_index=True)
+        if all(checks.values()):
+            st.success("✅ La referencia contiene la estructura aprobada.")
+        else:
+            st.warning("⚠️ La referencia no contiene todos los elementos esperados. Se conserva como referencia y no se inventan datos.")
+
+        result = st.session_state.get("result_json")
+        if result and st.button("🧩 Generar CP nuevo para revisión funcional", key="azure_prepare_new_cp_preview"):
+            try:
+                cases = result.get("TEST_CASES", []) or []
+                if not cases:
+                    raise ValueError("No hay Test Cases generados a partir de la HU.")
+                previews = [build_reference_preview_case(detail, tc) for tc in cases]
+                new_result = dict(result)
+                new_result["TEST_CASES"] = previews
                 st.session_state.azure_reference_preview = previews
-                st.session_state.result_json = preview_result
-                st.success(f"✅ {len(previews)} CP(s) preparados para revisión funcional.")
+                st.session_state.azure_preview_edit_mode = True
+                st.session_state.result_json = new_result
+                st.success(f"✅ {len(previews)} CP(s) preparados para revisión funcional. No se escribió en Azure.")
                 st.rerun()
+            except Exception as exc:
+                st.error(f"❌ No se pudo preparar el preview: {exc}")
 
-    # Eliminación local: nunca elimina Work Items de Azure.
+    # ---------------- Eliminación local ----------------
     result = st.session_state.get("result_json")
     if result and result.get("TEST_CASES"):
         st.markdown("### 🗑️ Eliminar caso de prueba")
-        cases = result.get("TEST_CASES", [])
-        options = [f"{i+1}. {tc.get('ID', 'CP')} — {tc.get('Title', '')}" for i, tc in enumerate(cases)]
-        selected_delete = st.selectbox("CP a eliminar", options, key="azure_delete_case_select")
-        delete_index = options.index(selected_delete)
-        confirm_delete = st.checkbox("Confirmo que quiero eliminar este CP de la generación actual.", key="azure_confirm_delete")
-        if st.button("🗑️ Eliminar CP seleccionado", disabled=not confirm_delete, key="azure_delete_cp"):
+        cases = result.get("TEST_CASES", []) or []
+        options = [f"{_text(tc.get('ID'), f'CASO-{i+1:05d}')} — {_case_title(tc, _text(tc.get('ID')))}" for i, tc in enumerate(cases)]
+        label = st.selectbox("Selecciona el CP que deseas eliminar", options, key="azure_delete_case_select")
+        index = options.index(label)
+        confirm = st.checkbox("Confirmo que quiero eliminar este CP de la generación actual.", key="azure_confirm_delete")
+        if st.button("🗑️ Eliminar CP seleccionado", disabled=not confirm, key="azure_delete_cp"):
             try:
-                st.session_state.result_json = delete_generated_case(result, delete_index)
-                st.session_state.excel_data = create_excel(st.session_state.result_json, "Autos Colectivos")
-                st.session_state.pdf_data = create_pdf(st.session_state.result_json, "Autos Colectivos", st.session_state.get("source_name", ""))
-                st.success("✅ CP eliminado de la generación actual. No se modificó Azure DevOps.")
+                st.session_state.result_json = delete_generated_case(result, index)
+                _rebuild_exports(st.session_state.result_json)
+                st.success("✅ CP eliminado de la generación actual. Azure no fue modificado.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"🚫 {exc}")
 
-    # Carga real a Azure: conserva la confirmación explícita de main.
-    cases = result.get("TEST_CASES", []) if result else []
-    if not cases:
-        st.warning("Primero genera al menos un Test Case.")
+    # ---------------- Carga real ----------------
+    if not result or not result.get("TEST_CASES"):
         return
 
-    case_labels = [f"{i+1}. {tc.get('ID', 'CP')} — {tc.get('Title', '')}" for i, tc in enumerate(cases)]
-    selected = st.multiselect("CP a cargar", case_labels, default=case_labels, key="azure_cases_select")
-    selected_cases = [cases[case_labels.index(label)] for label in selected]
-    st.caption(f"Se cargarán {len(selected_cases)} CP en la Suite seleccionada.")
+    st.markdown("### 🚀 Cargar CP en Azure DevOps")
+    case_map = {_text(tc.get("ID")): tc for tc in result.get("TEST_CASES", []) if _text(tc.get("ID"))}
+    selection_mode = st.radio("Casos a cargar", ["Un solo CP", "Seleccionar varios CP", "Todos los CP"], horizontal=True, key="azure_publish_selection")
+    ids = list(case_map)
+    if selection_mode == "Un solo CP":
+        chosen = st.selectbox("CP a cargar", ids, format_func=lambda x: f"{x} — {_case_title(case_map[x], x)[:100]}", key="azure_publish_single_case") if ids else None
+        selected_ids = [chosen] if chosen else []
+    elif selection_mode == "Seleccionar varios CP":
+        selected_ids = st.multiselect("Selecciona los CP que deseas cargar", ids, format_func=lambda x: f"{x} — {_case_title(case_map[x], x)[:100]}", key="azure_publish_multi_cases")
+    else:
+        selected_ids = ids
+        st.info(f"Se cargarán los {len(selected_ids)} CP generados actualmente.")
 
-    parent_id = st.text_input(
-        "ID Parent / IDPadre",
-        value=str(st.session_state.get("azure_id_padre", "")),
-        help="Se usa únicamente si se informa explícitamente. No se inventa.",
-        key="azure_parent_id",
-    )
-    st.session_state.azure_id_padre = parent_id.strip()
-    confirm = st.checkbox("Confirmo que quiero crear los Test Cases seleccionados y asociarlos a esta Suite.", key="azure_confirm_upload")
+    target_plan = None
+    target_suite = None
+    if plans:
+        plan_labels = [f"{_text(p.get('id'))} — {_text(p.get('name'), 'Sin nombre')}" for p in plans]
+        target_plan_label = st.selectbox("Test Plan destino", plan_labels, key="azure_publish_target_plan")
+        target_plan = plans[plan_labels.index(target_plan_label)]
+        target_plan_id = target_plan.get("id")
+        if st.session_state.get("azure_target_plan_id") != str(target_plan_id):
+            st.session_state.azure_target_plan_id = str(target_plan_id)
+            try:
+                st.session_state.azure_target_suites = list_test_suites(target_plan_id, cfg)
+            except Exception as exc:
+                st.session_state.azure_target_suites = []
+                st.error(f"❌ No se pudieron consultar las Suites del destino: {exc}")
+        target_suites = st.session_state.get("azure_target_suites", []) or []
+        if target_suites:
+            suite_labels = [f"{_text(s.get('id'))} — {_text(s.get('name'), 'Suite sin nombre')}" for s in target_suites]
+            target_suite_label = st.selectbox("Suite destino", suite_labels, key="azure_publish_target_suite")
+            target_suite = target_suites[suite_labels.index(target_suite_label)]
 
-    if st.button("🚀 Crear y asociar CP", type="primary", disabled=not confirm or not selected_cases, key="azure_create_cases"):
-        try:
-            cfg = _cfg()
-            if not cfg.enabled:
-                raise AzureDevOpsApiError("Azure DevOps está deshabilitado. Configura AZDO_ENABLED=true o un PAT válido.")
-            created, ids = [], []
-            resolved_parent = st.session_state.azure_id_padre.strip()
-            for tc in selected_cases:
-                case_parent = str(tc.get("IDPadre", "")).strip() or resolved_parent
-                wi = create_test_case(tc, cfg, parent_id=case_parent, area_path=plan.get("area_path"))
+    if not target_plan or not target_suite or not selected_ids:
+        if not plans:
+            st.warning("⚠️ Primero consulta los 10 Test Plans más recientes.")
+        return
+
+    st.markdown("### Datos obligatorios del proyecto")
+    st.caption("IDPadre es el Work Item padre/HU. Related Work → Parent se configura con el ID de la Suite destino, igual que en main.")
+    first = case_map[selected_ids[0]]
+    inferred = _text(first.get("IDPadre"), first.get("ID Padre"), first.get("Parent ID"))
+    parent_field = st.text_input("IDPadre (Work Item padre / HU)", value=_text(st.session_state.get("azure_id_padre"), inferred), key="azure_id_padre_input")
+    st.session_state.azure_id_padre = parent_field.strip()
+    tipo_origen = st.text_input("Tipo Origen Proyecto", value=_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto"), key="azure_tipo_origen_input")
+    st.session_state.azure_tipo_origen_proyecto = tipo_origen.strip() or "Proyecto"
+
+    duplicate_ids = []
+    try:
+        existing = list_test_cases(target_plan["id"], target_suite["id"], cfg)
+        existing_titles = {re.sub(r"\s+", " ", _text(x.get("title"))).strip().casefold() for x in existing}
+        for cp_id in selected_ids:
+            if re.sub(r"\s+", " ", _case_title(case_map[cp_id], cp_id)).strip().casefold() in existing_titles:
+                duplicate_ids.append(cp_id)
+    except Exception as exc:
+        st.warning(f"⚠️ No fue posible validar duplicados antes de la creación: {exc}")
+
+    if duplicate_ids:
+        st.error("🚫 Se detectaron títulos existentes en la Suite destino: " + ", ".join(duplicate_ids) + ". La creación queda bloqueada.")
+
+    can_sync = bool(selected_ids and target_plan and target_suite and not duplicate_ids and st.session_state.get("azure_id_padre"))
+    if can_sync:
+        st.success(f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | Suite {target_suite.get('id')} — {target_suite.get('name')} | CP: {len(selected_ids)}")
+    else:
+        st.warning("Completa CP, Test Plan, Suite, IDPadre y corrige duplicados antes de sincronizar.")
+
+    review_rows = [{"CP": cp_id, "Título": _case_title(case_map[cp_id], cp_id), "Caso de Uso": _text(case_map[cp_id].get("Related Use Case"), "Pendiente"), "Steps": len(case_map[cp_id].get("Steps", []) or [])} for cp_id in selected_ids]
+    st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
+    confirm = st.checkbox("Confirmo CP, Test Plan, Suite, IDPadre y Tipo Origen Proyecto y autorizo la creación en Azure.", key="azure_publish_confirm")
+    if st.button("🔄 Sincronizar con Azure DevOps", type="primary", disabled=not (can_sync and confirm), key="azure_publish_execute"):
+        created, errors, work_ids = [], [], []
+        for cp_id in selected_ids:
+            tc = dict(case_map[cp_id])
+            tc["IDPadre"] = st.session_state.azure_id_padre
+            tc["Tipo Origen Proyecto"] = st.session_state.azure_tipo_origen_proyecto
+            try:
+                wi = create_test_case(tc, cfg, parent_id=st.session_state.azure_id_padre, area_path=target_plan.get("area_path"))
                 wid = wi.get("id")
                 if not wid:
                     raise AzureDevOpsApiError("Azure no devolvió el ID del Work Item creado.")
-                if case_parent:
-                    add_parent_relation_to_work_item(wid, case_parent, cfg)
-                created.append({"cp_id": tc.get("ID"), "azure_id": wid, "title": tc.get("Title"), "parent_id": case_parent})
-                ids.append(wid)
-            add_test_cases_to_suite(plan["id"], suite["id"], ids, cfg)
-            st.success(f"✅ {len(created)} CP creados, asociados a la Suite {suite.get('id')} y vinculados al Parent informado.")
-            st.session_state.azure_upload_result = created
-            st.session_state.azure_confirm_upload = False
-        except Exception as exc:
-            st.error(f"❌ Error durante la carga a Azure: {exc}")
+                # Igual que main: IDPadre es el campo del Work Item; Parent relation usa la Suite destino.
+                add_parent_relation_to_work_item(wid, target_suite["id"], cfg)
+                work_ids.append(int(wid))
+                created.append({"cp_id": cp_id, "azure_id": wid, "parent_id": target_suite["id"], "status": "Work Item creado y Parent configurado"})
+            except Exception as exc:
+                errors.append({"cp_id": cp_id, "error": str(exc)})
+        if work_ids:
+            try:
+                add_test_cases_to_suite(target_plan["id"], target_suite["id"], work_ids, cfg)
+                for row in created:
+                    row["status"] = "Creado, Parent configurado y asociado a la Suite"
+            except Exception as exc:
+                errors.append({"cp_id": "LOTE", "error": str(exc)})
+        st.session_state.azure_publish_results = {"created": created, "errors": errors}
+        st.rerun()
 
-    if st.session_state.get("azure_upload_result"):
-        st.dataframe(st.session_state.azure_upload_result, width="stretch", hide_index=True)
+    publish_result = st.session_state.get("azure_publish_results")
+    if publish_result:
+        st.markdown("### 📌 Resultado de la creación en Azure")
+        if publish_result.get("created"):
+            st.dataframe(pd.DataFrame(publish_result["created"]), width="stretch", hide_index=True)
+            st.success(f"✅ {len(publish_result['created'])} CP procesados en Azure.")
+        for err in publish_result.get("errors", []):
+            st.error(f"❌ {_text(err.get('cp_id'))}: {_text(err.get('error'))}")
