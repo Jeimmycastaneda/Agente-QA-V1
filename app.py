@@ -73,351 +73,6 @@ def _az_get_json(url, pat):
             f"No fue posible comunicarse con Azure DevOps: {exc.reason}"
         ) from exc
 
-
-def _az_request_json(url, pat, method="POST", payload=None, content_type="application/json"):
-    """Solicitud Azure con escritura explícita; solo se invoca desde la confirmación de carga."""
-    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
-    req = Request(
-        url,
-        method=method,
-        data=body,
-        headers={
-            "Authorization": f"Basic {token}",
-            "Accept": "application/json",
-            "Content-Type": content_type,
-            "User-Agent": "Agente-QA-Streamlit/1.0",
-        },
-    )
-    try:
-        with urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            return json.loads(raw) if raw else {}, response.headers
-    except HTTPError as exc:
-        detail = ""
-        try:
-            detail = exc.read().decode("utf-8", errors="replace")[:1800]
-        except Exception:
-            pass
-        if exc.code in (401, 403):
-            raise AzureDevOpsError(
-                f"Azure rechazó la operación de escritura (HTTP {exc.code}). "
-                "Verifica que el PAT tenga permisos de Work Items/Test Plans y esté vigente."
-            ) from exc
-        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
-    except URLError as exc:
-        raise AzureDevOpsError(f"No fue posible comunicarse con Azure DevOps: {exc.reason}") from exc
-
-
-def _azure_steps_xml(steps):
-    """Construye Microsoft.VSTS.TCM.Steps con Action + Expected."""
-    nodes = []
-    for idx, step in enumerate(steps or [], start=1):
-        if not isinstance(step, dict):
-            continue
-        action = safe_text(step.get("Action"), step.get("action"), step.get("Step"))
-        expected = safe_text(
-            step.get("Expected value"),
-            step.get("Expected"),
-            step.get("expected"),
-        )
-        if not action and not expected:
-            continue
-        action_html = html.escape(action, quote=False).replace("\n", "<br />")
-        expected_html = html.escape(expected, quote=False).replace("\n", "<br />")
-        nodes.append(
-            f'<step id="{idx}" type="ActionStep">'
-            f'<parameterizedString isformatted="true">{action_html}</parameterizedString>'
-            f'<parameterizedString isformatted="true">{expected_html}</parameterizedString>'
-            f'</step>'
-        )
-    if not nodes:
-        return '<steps id="0" last="0"></steps>'
-    return f'<steps id="0" last="{len(nodes)}">{"".join(nodes)}</steps>'
-
-
-def _azure_description_html(description):
-    """Convierte la Description del CP a HTML real para Azure DevOps.
-
-    Azure DevOps no debe recibir Markdown (**) ni \n literales. Cada bloque se
-    envía como un párrafo HTML independiente y el Caso de Uso como una lista
-    HTML real para que Azure renderice separación y viñetas.
-    """
-    text = safe_text(description)
-    if not text:
-        return ""
-
-    # Convierte \n literales (dos caracteres) en saltos reales.
-    text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
-    text = text.replace("\\r", "\n")
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    # Si llega Markdown, conviértelo antes de escapar el contenido.
-    text = html.unescape(text)
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
-    text = re.sub(r"</?(?:div|p|span|blockquote)[^>]*>", "\n", text, flags=re.I)
-    text = re.sub(r"</?(?:ul|ol)[^>]*>", "\n", text, flags=re.I)
-    text = re.sub(r"<li[^>]*>", "- ", text, flags=re.I)
-    text = re.sub(r"</li>", "\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", "", text)
-
-    # Separa etiquetas aunque el modelo las haya pegado.
-    labels = [
-        "Producto:",
-        "Módulo:",
-        "Descripción:",
-        "Resultado esperado de la prueba:",
-        "Precondiciones:",
-        "Caso de uso relacionado:",
-    ]
-    for label in labels:
-        text = re.sub(
-            rf"\s*{re.escape(label)}\s*",
-            f"\n{label} ",
-            text,
-            count=1,
-            flags=re.I,
-        )
-
-    # Normaliza viñetas y espacios sin perder separación entre párrafos.
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"(?m)^\s*[•●▪◦]\s*", "- ", text)
-    text = re.sub(r"(?m)^\s*[o]\s+", "- ", text)
-    text = re.sub(r"(?m)^\s*[-–—]\s*", "- ", text)
-    text = re.sub(r" *\n *", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-
-    # Captura cada sección hasta la siguiente.
-    block_pattern = re.compile(
-        r"(?ms)^(Producto:|Módulo:|Descripción:|Resultado esperado de la prueba:|"
-        r"Precondiciones:|Caso de uso relacionado:)\s*(.*?)(?=\n(?:Producto:|Módulo:|"
-        r"Descripción:|Resultado esperado de la prueba:|Precondiciones:|Caso de uso relacionado:)|$)",
-        re.I,
-    )
-    blocks = block_pattern.findall(text)
-
-    if not blocks:
-        return f"<p>{html.escape(text, quote=False)}</p>"
-
-    html_blocks = []
-    for label, content in blocks:
-        label = next((x for x in labels if x.lower() == label.lower()), label)
-        content = content.strip()
-        if not content:
-            content = "Pendiente"
-
-        lines = [line.strip() for line in content.split("\n") if line.strip()]
-        bullets = [line[2:].strip() for line in lines if line.startswith("- ")]
-        normal = [line for line in lines if not line.startswith("- ")]
-        label_html = f"<strong>{html.escape(label)}</strong>"
-
-        if label.rstrip(":") == "Caso de uso relacionado" or (bullets and not normal):
-            items = bullets or [content]
-            list_html = "".join(
-                f"<li>{html.escape(item, quote=False)}</li>" for item in items
-            )
-            html_blocks.append(f"<p>{label_html}</p><ul>{list_html}</ul>")
-        else:
-            content_html = "<br/>".join(
-                html.escape(line, quote=False) for line in lines
-            )
-            html_blocks.append(f"<p>{label_html} {content_html}</p>")
-
-    # Párrafo vacío explícito entre secciones: Azure lo renderiza como espacio.
-    return "<p>&nbsp;</p>".join(html_blocks)
-
-def _get_id_padre(tc):
-    """Obtiene el ID padre explícito. Nunca usa el Test Plan como sustituto."""
-    for key in ("IDPadre", "ID Padre", "Parent ID", "ParentId", "parent_id", "id_padre"):
-        value = safe_text(tc.get(key))
-        if value:
-            return value
-    return safe_text(st.session_state.get("azure_id_padre"))
-
-
-def _tipo_origen_proyecto(tc):
-    """Valor requerido por el campo Custom.TipoOrigenProyecto."""
-    return safe_text(
-        tc.get("Tipo Origen Proyecto"),
-        tc.get("TipoOrigenProyecto"),
-        st.session_state.get("azure_tipo_origen_proyecto"),
-        "Proyecto",
-    )
-
-
-def create_azure_test_case_work_item(tc, target_plan):
-    """Crea un Work Item de tipo Test Case. Solo se llama al confirmar.
-
-    V43: el proyecto corporativo exige Custom.IDPadre y Custom.TipoOrigenProyecto.
-    IDPadre debe venir de la HU/CP o ser informado explícitamente por la usuaria;
-    nunca se inventa ni se reemplaza por el ID del Test Plan o de la Suite.
-    """
-    cfg = _az_config()
-    _az_validate(cfg)
-    case_id = safe_text(tc.get("ID"), "CP-PREVIEW")
-    title = build_case_title(tc, case_id)
-    description = safe_text(tc.get("Description"))
-    if not description:
-        description = build_azure_description(
-            safe_text(tc.get("Product"), "Cotizadores Web"),
-            safe_text(tc.get("Module"), "Cotizador Autos Colectivos"),
-            safe_text(tc.get("Scenario"), title),
-            safe_text(tc.get("Expected Result"), "Pendiente"),
-            safe_text(tc.get("Preconditions"), "Pendiente"),
-            safe_text(tc.get("Related Use Case"), "Pendiente"),
-        )
-
-    id_padre = _get_id_padre(tc)
-    tipo_origen = _tipo_origen_proyecto(tc)
-    if not id_padre:
-        raise AzureDevOpsError(
-            "No se puede crear el CP: Azure exige el campo Custom.IDPadre. "
-            "Informa el ID del Work Item padre (HU/elemento funcional) antes de confirmar. "
-            "No se usará automáticamente el Test Plan ni la Suite como IDPadre."
-        )
-    if not tipo_origen:
-        raise AzureDevOpsError(
-            "No se puede crear el CP: Azure exige Custom.TipoOrigenProyecto. "
-            "El valor esperado para esta configuración es 'Proyecto'."
-        )
-
-    # Si el campo es numérico en Azure, enviar entero cuando el valor es solo numérico;
-    # de lo contrario conservar texto para que Azure devuelva una validación explícita.
-    id_padre_value = int(id_padre) if id_padre.isdigit() else id_padre
-    patch = [
-        {"op": "add", "path": "/fields/System.Title", "value": title},
-        {"op": "add", "path": "/fields/System.Description", "value": _azure_description_html(description)},
-        {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": _azure_steps_xml(safe_steps(tc))},
-        {"op": "add", "path": "/fields/Custom.IDPadre", "value": id_padre_value},
-        {"op": "add", "path": "/fields/Custom.TipoOrigenProyecto", "value": tipo_origen},
-    ]
-    area_path = safe_text(target_plan.get("area_path"))
-    iteration = safe_text(target_plan.get("iteration"))
-    if area_path:
-        patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
-    if iteration:
-        patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration})
-
-    org = quote(cfg["org"], safe="")
-    project = quote(cfg["project"], safe="")
-    url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/$Test%20Case?api-version=7.1"
-    payload, _ = _az_request_json(
-        url,
-        cfg["pat"],
-        method="POST",
-        payload=patch,
-        content_type="application/json-patch+json",
-    )
-    return payload
-
-
-def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
-    """Asocia los Work Items recién creados a la Suite destino."""
-    cfg = _az_config()
-    _az_validate(cfg)
-    if not work_item_ids:
-        return []
-    path = f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase"
-    url = _az_testplan_url(cfg, path) + "?api-version=7.1"
-    body = [{"workItem": {"id": int(wid)}} for wid in work_item_ids]
-    payload, _ = _az_request_json(url, cfg["pat"], method="POST", payload=body)
-    return payload.get("value", payload if isinstance(payload, list) else [])
-
-
-def add_parent_relation_to_work_item(work_item_id, parent_id):
-    """Agrega Related Work -> Parent al Test Case creado.
-
-    Por solicitud funcional, el Parent se toma del ID de la Suite destino.
-    Azure debe aceptar ese ID como Work Item para que el vínculo Parent sea válido.
-    """
-    cfg = _az_config()
-    _az_validate(cfg)
-
-    work_item_id = safe_text(work_item_id)
-    parent_id = safe_text(parent_id)
-    if not work_item_id or not parent_id:
-        raise AzureDevOpsError(
-            "No se pudo configurar el Parent: falta el ID del Test Case o el ID de la Suite destino."
-        )
-
-    org = quote(cfg["org"], safe="")
-    project = quote(cfg["project"], safe="")
-    url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
-        f"{quote(str(work_item_id), safe='')}?api-version=7.1"
-    )
-
-    parent_url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
-        f"{quote(str(parent_id), safe='')}"
-    )
-
-    patch = [{
-        "op": "add",
-        "path": "/relations/-",
-        "value": {
-            "rel": "System.LinkTypes.Hierarchy-Reverse",
-            "url": parent_url,
-            "attributes": {
-                "comment": f"Parent configurado con el ID de la Suite destino {parent_id}."
-            },
-        },
-    }]
-
-    payload, _ = _az_request_json(
-        url,
-        cfg["pat"],
-        method="PATCH",
-        payload=patch,
-        content_type="application/json-patch+json",
-    )
-    return payload
-
-
-def create_selected_cases_in_azure(cases, target_plan, target_suite):
-    """Crea y asocia los CP seleccionados, devolviendo resultado por caso."""
-    created, work_item_ids, errors = [], [], []
-    for tc in cases:
-        cp_id = safe_text(tc.get("ID"), "CP-PREVIEW")
-        try:
-            wi = create_azure_test_case_work_item(tc, target_plan)
-            azure_id = wi.get("id")
-            if not azure_id:
-                raise AzureDevOpsError("Azure no devolvió el ID del Work Item creado.")
-
-            # Related Work -> Parent: usar el ID de la Suite destino,
-            # tal como se solicitó para esta versión.
-            suite_parent_id = safe_text(target_suite.get("id"))
-            if not suite_parent_id:
-                raise AzureDevOpsError("La Suite destino no tiene un ID válido para configurar el Parent.")
-
-            add_parent_relation_to_work_item(azure_id, suite_parent_id)
-
-            work_item_ids.append(int(azure_id))
-            created.append({
-                "cp_id": cp_id,
-                "title": build_case_title(tc, cp_id),
-                "azure_id": int(azure_id),
-                "parent_id": suite_parent_id,
-                "status": "Work Item creado, Parent configurado y pendiente de asociar a Suite",
-            })
-        except Exception as exc:
-            errors.append({"cp_id": cp_id, "error": str(exc)})
-
-    if work_item_ids:
-        try:
-            add_test_cases_to_suite(target_plan["id"], target_suite["id"], work_item_ids)
-            for row in created:
-                row["status"] = "Creado y asociado a la Suite"
-        except Exception as exc:
-            for row in created:
-                row["status"] = "Work Item creado, pero NO se pudo asociar a la Suite"
-                row["association_error"] = str(exc)
-            errors.append({"cp_id": "LOTE", "error": f"No se pudo asociar el lote a la Suite: {exc}"})
-    return {"created": created, "errors": errors}
-
-
 def test_connection():
     cfg = _az_config()
     _az_validate(cfg)
@@ -495,120 +150,73 @@ def list_test_suites(plan_id):
     return rows
 
 def list_test_cases(plan_id, suite_id):
-    """
-    Consulta los Test Cases asociados a la Suite seleccionada, SOLO lectura.
-
-    Azure expone dos rutas GET válidas para esta información:
-      1) Test Plan API: /_apis/testplan/Plans/{plan}/Suites/{suite}/TestCase
-      2) Test API:      /_apis/test/Plans/{plan}/suites/{suite}/testcases
-
-    Algunas Suites pueden devolver 0 elementos por la primera ruta aunque
-    sí contengan Test Cases visibles en Azure. Si la primera consulta viene
-    vacía, se utiliza la segunda ruta oficial, también de solo lectura.
-    """
     cfg = _az_config()
     _az_validate(cfg)
-
-    def _normalize_case_rows(payload):
-        rows = []
-        values = payload.get("value") if isinstance(payload, dict) else []
-
-        for item in values or []:
-            if not isinstance(item, dict):
-                continue
-
-            # Azure puede devolver el Work Item en testCase, workItem
-            # o directamente en el objeto.
-            wi = {}
-            for key in ("testCase", "workItem"):
-                candidate = item.get(key)
-                if isinstance(candidate, dict):
-                    wi = candidate
-                    break
-            if not wi:
-                wi = item
-
-            nested_work_item = wi.get("workItem")
-            nested_id = (
-                nested_work_item.get("id")
-                if isinstance(nested_work_item, dict)
-                else None
-            )
-
-            raw_id = wi.get("id") or item.get("id") or nested_id
-
-            # Algunas respuestas entregan únicamente la URL del Work Item.
-            if not raw_id:
-                for container in (wi, item):
-                    if not isinstance(container, dict):
-                        continue
-                    for key in ("url", "href", "webUrl"):
-                        value = container.get(key)
-                        if value:
-                            match = re.search(
-                                r"/workitems/(\d+)(?:[/?]|$)",
-                                str(value),
-                                re.I,
-                            )
-                            if match:
-                                raw_id = match.group(1)
-                                break
-                    if raw_id:
-                        break
-
-            title = (
-                wi.get("name")
-                or wi.get("title")
-                or item.get("name")
-                or item.get("title")
-            )
-
-            # Nunca mostrar "None —".
-            if raw_id is None or str(raw_id).strip() == "":
-                continue
-
-            rows.append({
-                "id": str(raw_id).strip(),
-                "title": _ui_text(title, "Test Case sin título"),
-                "raw": item,
-            })
-
-        # Evita duplicados por ID.
-        unique = []
-        seen = set()
-        for row in rows:
-            if row["id"] in seen:
-                continue
-            seen.add(row["id"])
-            unique.append(row)
-
-        return unique
-
-    # 1) Ruta oficial del servicio Test Plan.
     path = (
         f"Plans/{quote(str(plan_id), safe='')}/Suites/"
         f"{quote(str(suite_id), safe='')}/TestCase"
     )
     payload, _ = _az_get_json(
-        _az_testplan_url(cfg, path)
-        + "?api-version=7.1&expand=true",
+        _az_testplan_url(cfg, path) + "?api-version=7.1",
         cfg["pat"],
     )
-    rows = _normalize_case_rows(payload)
 
-    # 2) Fallback oficial del servicio Test.
-    # Solo se ejecuta si la primera consulta devuelve cero casos.
-    if not rows:
-        org = quote(cfg["org"], safe="")
-        project = quote(cfg["project"], safe="")
-        fallback_url = (
-            f"https://dev.azure.com/{org}/{project}/_apis/test/"
-            f"Plans/{quote(str(plan_id), safe='')}/"
-            f"suites/{quote(str(suite_id), safe='')}/testcases"
-            "?api-version=7.1"
+    rows = []
+    for item in payload.get("value") or []:
+        # Azure puede devolver el Work Item en testCase, workItem o directamente.
+        wi = {}
+        for key in ("testCase", "workItem"):
+            candidate = item.get(key)
+            if isinstance(candidate, dict):
+                wi = candidate
+                break
+        if not wi:
+            wi = item if isinstance(item, dict) else {}
+
+        # ID robusto: primero id directo; luego posibles referencias/URLs.
+        # IMPORTANTE: no usar una expresión condicional sin paréntesis aquí.
+        # Azure normalmente devuelve el ID directamente en testCase.id.
+        # La versión anterior podía convertir ese ID válido en None
+        # porque el "else None" afectaba toda la expresión.
+        nested_work_item = wi.get("workItem")
+        nested_id = (
+            nested_work_item.get("id")
+            if isinstance(nested_work_item, dict)
+            else None
         )
-        fallback_payload, _ = _az_get_json(fallback_url, cfg["pat"])
-        rows = _normalize_case_rows(fallback_payload)
+        raw_id = (
+            wi.get("id")
+            or item.get("id")
+            or nested_id
+        )
+        if not raw_id:
+            for container in (wi, item):
+                for key in ("url", "href"):
+                    value = container.get(key) if isinstance(container, dict) else None
+                    if value:
+                        match = re.search(r"/workitems/(\d+)(?:[/?]|$)", str(value), re.I)
+                        if match:
+                            raw_id = match.group(1)
+                            break
+                if raw_id:
+                    break
+
+        title = (
+            wi.get("name")
+            or wi.get("title")
+            or item.get("name")
+            or item.get("title")
+        )
+
+        # No mostrar registros sin ID: son referencias incompletas y producen "None —".
+        if raw_id is None or str(raw_id).strip() == "":
+            continue
+
+        rows.append({
+            "id": str(raw_id).strip(),
+            "title": _ui_text(title, "Test Case sin título"),
+            "raw": item,
+        })
 
     return rows
 
@@ -701,6 +309,115 @@ def _extract_related_cu(tc):
         else:
             results.append(part)
     return results
+
+
+def _use_case_catalog(identified_use_cases):
+    """Normaliza el catálogo de CU identificado en la HU/documentación."""
+    catalog = []
+    for cu in identified_use_cases or []:
+        if isinstance(cu, dict):
+            cid = safe_text(
+                cu.get("ID"), cu.get("id"), cu.get("Use Case ID"), cu.get("CU")
+            )
+            name = safe_text(
+                cu.get("Name"), cu.get("name"), cu.get("Title"), cu.get("Description")
+            )
+        else:
+            cid = safe_text(cu)
+            name = cid
+        if cid or name:
+            catalog.append({"id": cid, "name": name or cid})
+    return catalog
+
+
+def _resolve_related_use_cases(data, source_content=""):
+    """Resuelve Related Use Case sin inventar, siguiendo la prioridad aprobada.
+
+    1. Usa Related Use Case si ya existe.
+    2. Si falta, busca evidencia en 'Casos de Uso Relacionados'.
+    3. Si aún falta, usa el título/nombre del CU identificado en la HU.
+    4. Si no hay una coincidencia única, deja vacío y genera alerta.
+    """
+    cases = data.get("TEST_CASES", []) or []
+    catalog = _use_case_catalog(data.get("USE_CASES", []))
+    if not catalog:
+        return
+
+    source = safe_text(source_content)
+    related_block = ""
+    if source:
+        marker = re.search(r"Casos de Uso Relacionados\s*:?(.*?)(?=\n\s*(?:Precondiciones|Criterios de Aceptación|Descripción|Resultado esperado|Historia de Usuario|Casos de Uso)\b|\Z)", source, flags=re.I | re.S)
+        if marker:
+            related_block = marker.group(1)
+
+    related_norm = _normalize_cu(related_block)
+
+    for tc in cases:
+        current = safe_text(
+            tc.get("Related Use Case"),
+            tc.get("RelatedUseCase"),
+            tc.get("Caso de uso relacionado"),
+        )
+        if current and _extract_related_cu(tc):
+            continue
+
+        searchable = " ".join(
+            safe_text(tc.get(k))
+            for k in (
+                "Title", "Scenario", "Description", "Criterion",
+                "Requirement / Use Case", "use_case", "related_use_case"
+            )
+        )
+        searchable_norm = _normalize_cu(searchable)
+
+        # 2) Buscar primero en la sección explícita de Casos de Uso Relacionados.
+        matches = []
+        for cu in catalog:
+            cid = _normalize_cu(cu["id"])
+            name = _normalize_cu(cu["name"])
+            if (cid and cid in related_norm) or (name and name in related_norm):
+                matches.append(cu)
+
+        # Si el bloque tiene varias relaciones, usar la que además coincida con
+        # el escenario del CP; nunca elegir arbitrariamente entre varias.
+        if len(matches) > 1:
+            contextual = [
+                cu for cu in matches
+                if (_normalize_cu(cu["id"]) and _normalize_cu(cu["id"]) in searchable_norm)
+                or (_normalize_cu(cu["name"]) and _normalize_cu(cu["name"]) in searchable_norm)
+            ]
+            if len(contextual) == 1:
+                matches = contextual
+
+        if len(matches) == 1:
+            tc["Related Use Case"] = f"{matches[0]['id']} - {matches[0]['name']}"
+            continue
+
+        # 3) Si no existe relación explícita, buscar el título/nombre del CU
+        # dentro del escenario/Descripción generado a partir de la HU.
+        title_matches = []
+        for cu in catalog:
+            name_norm = _normalize_cu(cu["name"])
+            cid_norm = _normalize_cu(cu["id"])
+            if (name_norm and name_norm in searchable_norm) or (cid_norm and cid_norm in searchable_norm):
+                title_matches.append(cu)
+
+        if len(title_matches) == 1:
+            tc["Related Use Case"] = f"{title_matches[0]['id']} - {title_matches[0]['name']}"
+            continue
+
+        # 4) No inventar. La generación queda trazable y el dato se valida antes
+        # de crear cualquier CP en Azure.
+        tc["Related Use Case"] = ""
+        alerts = tc.get("Alerts")
+        if not isinstance(alerts, list):
+            alerts = []
+            tc["Alerts"] = alerts
+        alerts.append({
+            "Alert": "Caso de uso relacionado no identificado de forma inequívoca",
+            "Reason": "No se encontró una relación explícita ni una coincidencia única con los Casos de Uso identificados en la Historia de Usuario.",
+            "Validation Required": "Validar el Caso de Uso relacionado con el equipo funcional antes de crear el CP en Azure.",
+        })
 
 
 def calculate_cu_coverage(cases, identified_use_cases):
@@ -851,7 +568,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V49-ESTABLE-PROFUNDIDAD"
+APP_VERSION = "V36-ULTIMOS10-REFERENCIA-Y-REVISION-FUNCIONAL"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1072,32 +789,17 @@ def normalize_validation_method(value):
 
 
 
-def _remove_trailing_pipe(value):
-    """Elimina únicamente un pipe sobrante al final, conservando espacios y saltos internos."""
-    text = safe_text(value)
-    # Quita pipes sobrantes al final del valor o justo antes de un salto de línea.
-    # No toca pipes internos ni modifica la separación entre secciones.
-    text = re.sub(r"[ \t]*\|[ \t]*(?=\n|$)", "", text)
-    return text.rstrip()
-
-
 def build_azure_description(product, module, description, expected, preconditions, related_use_case):
     """Construye la estructura aprobada de Description para Azure sin inventar datos."""
-    product = _remove_trailing_pipe(product)
-    module = _remove_trailing_pipe(module)
-    desc = _remove_trailing_pipe(description)
-    expected = _remove_trailing_pipe(expected)
-    preconditions = _remove_trailing_pipe(preconditions)
-    related_use_case = _remove_trailing_pipe(related_use_case)
-
+    desc = safe_text(description)
     desc = re.sub(r"(?mi)^\s*Descripción:\s*", "", desc, count=1).strip()
     return (
-        f"Producto: {product or 'Pendiente'}\n\n"
-        f"Módulo: {module or 'Pendiente'}\n\n"
+        f"Producto: {safe_text(product, 'Pendiente')}\n\n"
+        f"Módulo: {safe_text(module, 'Pendiente')}\n\n"
         f"Descripción: {desc or 'Pendiente'}\n\n"
-        f"Resultado esperado de la prueba: {expected or 'Pendiente'}\n\n"
-        f"Precondiciones: {preconditions or 'Pendiente'}\n\n"
-        f"Caso de uso relacionado: {related_use_case or 'Pendiente'}"
+        f"Resultado esperado de la prueba: {safe_text(expected, 'Pendiente')}\n\n"
+        f"Precondiciones: {safe_text(preconditions, 'Pendiente')}\n\n"
+        f"Caso de uso relacionado: {safe_text(related_use_case, 'Pendiente')}"
     )
 
 
@@ -1132,6 +834,7 @@ def format_description_for_azure(description):
     text = re.sub(r"\n\s*[-–—]\s*", "\n- ", text)
 
     # Si hay bullets pegados después de una oración, sepáralos.
+    text = re.sub(r"\s+(-\s+)", r"\n\1", text)
 
     # Limpieza de saltos excesivos.
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -1144,11 +847,6 @@ def format_description_for_azure(description):
     for label in labels[1:]:
         text = re.sub(rf"\n\*\*{re.escape(label)}\*\*", f"\n\n**{label}**", text)
     text = re.sub(r"^\*\*Producto:\*\*", "**Producto:**", text)
-
-    # IMPORTANTE: elimina únicamente pipes que quedaron como separadores
-    # al final de una sección. No elimina pipes internos que formen parte
-    # del contenido funcional. Conserva los saltos de línea y espacios.
-    text = re.sub(r"[ \t]*\|[ \t]*(?=\n|$)", "", text)
 
     return text.strip()
 
@@ -1336,7 +1034,7 @@ def extract_source(uploaded_file):
 
 
 # ============================================================
-# PROMPT QA V34 — profundidad funcional, formato y reglas vigentes
+# PROMPT EXISTENTE — SE CONSERVA SIN CAMBIOS
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_prompt():
@@ -1442,8 +1140,12 @@ relacionado. NO generes CP básicos, genéricos ni resumidos.
 - Related Use Case debe indicar el ID y, cuando esté disponible, el nombre del CU.
 - Cada CP debe corresponder a EXACTAMENTE un CU.
 - Debe existir como mínimo un CP por cada CU identificado.
-- Si un CU requiere varios escenarios funcionales realmente distintos, puede tener
-  varios CP; no crees CP adicionales solo para separar pasos.
+- Si un CU contiene explícitamente dos o más reglas, condiciones, comportamientos, validaciones o resultados funcionales diferenciados, DEBES generar un CP independiente para cada regla o comportamiento diferenciado. Cada CP debe validar de forma completa la regla que le corresponde, incluyendo contexto, precondiciones, resultado y todos los Steps necesarios.
+- Si los requisitos están numerados dentro del CU, analiza cada ítem. Cuando dos ítems representen comportamientos funcionales verificables diferentes, genera CP independientes para cada uno. No agrupes en un mismo CP reglas funcionalmente diferentes solo porque pertenezcan al mismo CU.
+- Esta separación NO significa crear un CP por cada Step. Un CP puede contener todos los Steps necesarios para validar completamente su regla.
+- Si un requisito está repetido literalmente y no aporta un comportamiento funcional nuevo, no generes un CP adicional por la repetición.
+- Si una misma funcionalidad/CU menciona explícitamente dos o más tipos de cotización y cada tipo tiene una regla, cálculo, comportamiento o condición funcional diferenciada, genera CP independientes para cada tipo de cotización y valida cada escenario de forma completa.
+- Cada CP independiente debe conservar la trazabilidad al mismo CU cuando corresponda y debe incluir la ruta funcional necesaria para ejecutar su validación específica.
 
 2. DESCRIPCIÓN SUPER DETALLADA
 La Description del CP debe explicar el escenario funcional completo. Incluye,
@@ -1587,10 +1289,7 @@ def generate_qa_data(
         "No conviertas Steps en CP. "
         "Related Use Case debe conservar el ID del CU y puede venir como CU-324, CU-324 - nombre o CU-324: nombre; "
         "debe validarse contra los CU reales identificados en USE_CASES. "
-        "Para determinar Related Use Case aplica esta prioridad estricta: 1) buscar el CU en la Historia de Usuario/documentación; "
-        "2) buscarlo específicamente en la sección 'Casos de Uso Relacionados' (incluyendo variantes de mayúsculas/minúsculas y acentos); "
-        "3) si definitivamente no aparece allí, utilizar el título/nombre del Caso de Uso que esté indicado en la Historia de Usuario. "
-        "No inventar un CU ni dejarlo como None si existe un título de CU en la fuente. Si no existe ninguna referencia en la fuente, marcarlo como pendiente y generar ALERTA. "
+        "REGLA OBLIGATORIA PARA CASO DE USO RELACIONADO: si Related Use Case no está definido, busca primero la relación en la sección o campo 'Casos de Uso Relacionados' de la Historia de Usuario/documentación. Si allí no existe una relación utilizable, toma el título/nombre del Caso de Uso que aparece en la Historia de Usuario y úsalo como Caso de uso relacionado, conservando su ID cuando esté disponible. Solo utiliza Casos de Uso presentes en USE_CASES. Si no existe evidencia suficiente o hay más de una coincidencia posible, no inventes: deja el campo vacío y genera ALERTA para validación funcional. "
         "Cuando la navegación no esté definida explícitamente, puedes redactar una opción posible de acceso "
         "solo si existe evidencia suficiente en la documentación. No uses las etiquetas Ruta estimada o "
         "Navegación sugerida, no inventes botones, URLs, menús, pantallas ni rutas, y conserva siempre las "
@@ -1643,6 +1342,7 @@ def generate_qa_data(
                     data = json.loads(match.group(1))
 
                 validated = validate_qa_structure(data)
+                _resolve_related_use_cases(validated, source_content)
                 validate_minimum_cu_coverage(validated)
 
                 st.session_state.quota_exceeded = False
@@ -2353,7 +2053,6 @@ def _build_reference_preview_case(reference_detail, generated_case):
         "reference_test_case_title": reference_detail.get("title"),
     }
 
-
 # ============================================================
 # INTERFAZ
 # ============================================================
@@ -2382,12 +2081,6 @@ for _key, _default in {
     "azure_reference_case_id": None,
     "azure_reference_detail": None,
     "azure_reference_preview": None,
-    "azure_preview_edit_mode": False,
-    "azure_target_plan_id": None,
-    "azure_target_suite_id": None,
-    "azure_target_suites": [],
-    "azure_publish_selection": "Un solo CP",
-    "azure_publish_results": None,
 }.items():
     if _key not in st.session_state:
         st.session_state[_key] = _default
@@ -2464,7 +2157,7 @@ with st.sidebar:
     st.markdown("### 📋 Test Plans")
     st.caption(
         "Consulta de solo lectura. Solo se muestran los 10 Test Plans más recientes. "
-        "La creación de Test Cases se realiza únicamente en el bloque final de confirmación."
+        "No crea, edita ni elimina Test Plans, Suites ni Test Cases."
     )
 
     if st.button("📋 Consultar 10 Test Plans", key="azure_list_test_plans"):
@@ -2518,67 +2211,6 @@ with st.sidebar:
                 st.error(f"❌ No se pudieron consultar las Suites: {exc}")
             except Exception as exc:
                 st.error(f"❌ Error inesperado al consultar Suites: {exc}")
-
-    # ========================================================
-    # ELIMINAR CP — UBICADO DEBAJO DE LOS 10 TEST PLANS MÁS RECIENTES
-    # ========================================================
-    # La eliminación sigue siendo SOLO sobre la generación actual en memoria.
-    # No elimina Test Cases de Azure DevOps.
-    delete_result = st.session_state.get("result_json")
-    if delete_result and delete_result.get("TEST_CASES"):
-        st.markdown("### 🗑️ Eliminar caso de prueba")
-        st.caption(
-            "Ubicado debajo de los 10 Test Plans más recientes. Esta acción elimina el CP "
-            "solo de la generación actual y de COVERAGE; no elimina ningún recurso de Azure DevOps."
-        )
-        delete_cases = delete_result.get("TEST_CASES", []) or []
-        delete_options = []
-        for idx, tc in enumerate(delete_cases):
-            delete_id = safe_text(tc.get("ID"), f"CASO-{idx + 1:05d}")
-            delete_title = build_case_title(tc, delete_id)
-            delete_options.append(f"{delete_id} — {delete_title[:100]}")
-
-        delete_label = st.selectbox(
-            "Selecciona el CP que deseas eliminar",
-            delete_options,
-            key="v44_delete_case_select",
-        )
-        delete_index = delete_options.index(delete_label)
-        delete_case_id = safe_text(
-            delete_cases[delete_index].get("ID"),
-            f"CASO-{delete_index + 1:05d}",
-        )
-        confirm_delete = st.checkbox(
-            f"Confirmo que quiero eliminar {delete_case_id}",
-            key=f"v44_confirm_delete_{delete_index}",
-        )
-        if st.button(
-            "🗑️ Eliminar CP seleccionado",
-            type="secondary",
-            disabled=not confirm_delete,
-            key="v44_delete_cp",
-        ):
-            candidate_cases = [
-                tc for i, tc in enumerate(delete_cases)
-                if i != delete_index
-            ]
-            deletion_coverage = calculate_cu_coverage(
-                candidate_cases,
-                delete_result.get("USE_CASES", [])
-            )
-            if not deletion_coverage["valid"]:
-                st.error(
-                    "🚫 No se puede eliminar este CP porque dejaría al menos un CU sin cobertura."
-                )
-            elif delete_test_case(delete_result, delete_index):
-                st.session_state.excel_data = create_excel(delete_result, selected_config)
-                st.session_state.pdf_data = create_pdf(
-                    delete_result,
-                    selected_config,
-                    st.session_state.get("source_name", ""),
-                )
-                st.success(f"✅ {delete_case_id} eliminado.")
-                st.rerun()
 
     suites = st.session_state.get("azure_reference_suites", [])
     if suites:
@@ -2698,53 +2330,118 @@ with st.sidebar:
             )
 
         current_result = st.session_state.get("result_json")
-        if current_result:
-            st.markdown("### 4️⃣ Generar CP nuevo con base en la HU + referencia Azure — PREVIEW")
+        if current_result and all(checks.values()):
+            st.markdown("### 4️⃣ Preparar nuevo Test Case — PREVIEW")
             st.caption(
-                "El CP nuevo se toma de la HU/documentación generada por el Agente QA y se presenta "
-                "con la estructura observada en el Test Case real de Azure seleccionado. "
-                "Los datos funcionales NO se copian desde Azure: se toman de la HU. "
-                "En esta etapa NO se crea ni modifica ningún recurso en Azure."
+                "El agente toma la estructura del Test Case de referencia y la aplica "
+                "al CP generado. En esta etapa NO se crea ni modifica ningún recurso en Azure."
             )
-            if not all(checks.values()):
-                st.warning(
-                    "⚠️ La referencia no contiene todos los elementos de la estructura aprobada. "
-                    "Se usará únicamente como referencia visual/estructural; los elementos faltantes "
-                    "se tomarán de la HU si existen y, si no existen, quedarán como faltantes con alerta."
-                )
             if st.button(
-                "🧩 Generar CP nuevo para revisión funcional",
+                "🧩 Preparar CP nuevo con la estructura de referencia",
                 key="azure_prepare_new_cp_preview",
             ):
                 try:
                     generated_cases = current_result.get("TEST_CASES", []) or []
                     if not generated_cases:
-                        raise ValueError("No hay Test Cases generados a partir de la HU.")
-
-                    # PREVIEW: un CP por cada CU generado, sin POST a Azure.
-                    previews = []
-                    for generated_case in generated_cases:
-                        previews.append(
-                            _build_reference_preview_case(
-                                reference_detail,
-                                generated_case,
-                            )
-                        )
-                    st.session_state.azure_reference_preview = previews
-                    st.session_state.azure_preview_edit_mode = True
-                    # El PREVIEW se edita en la sección existente "✏️ Editar caso de prueba".
-                    # No se crea una sección nueva y Azure permanece en modo solo lectura.
-                    result_for_preview = dict(current_result)
-                    result_for_preview["TEST_CASES"] = previews
-                    st.session_state.result_json = result_for_preview
-                    st.success(
-                        f"✅ {len(previews)} CP(s) preparados para revisión funcional. "
-                        "Ahora se muestran en la sección existente '✏️ Editar caso de prueba'."
+                        raise ValueError("No hay Test Cases generados para preparar el preview.")
+                    st.session_state.azure_reference_preview = _build_reference_preview_case(
+                        reference_detail,
+                        generated_cases[0],
                     )
-                    st.rerun()
                 except Exception as exc:
                     st.error(f"❌ No se pudo preparar el PREVIEW: {exc}")
 
+        preview = st.session_state.get("azure_reference_preview")
+        if preview:
+            st.markdown("### 👀 CP nuevo antes de enviarlo a Azure")
+            st.info(
+                "PUNTO DE CONTROL: este CP es únicamente una vista previa. "
+                "No se ha realizado ningún POST/creación en Azure DevOps."
+            )
+            st.markdown(f"**Title:** {safe_text(preview.get('Title'))}")
+
+            st.markdown("#### Description")
+            for label, value in _reference_description_sections(preview.get("Description", "")):
+                with st.container(border=True):
+                    st.markdown(f"**{label}**")
+                    st.write(value)
+
+            st.markdown("#### Steps")
+            preview_steps = pd.DataFrame(preview.get("Steps") or [])
+            if not preview_steps.empty:
+                cols = [c for c in ["Step #", "Action", "Expected value"] if c in preview_steps.columns]
+                st.dataframe(preview_steps[cols], width="stretch", hide_index=True)
+            else:
+                st.warning("⚠️ El CP nuevo no tiene Steps para revisar.")
+
+            st.warning(
+                "🛑 FIN DE ESTA FASE: el CP queda listo para revisión funcional. "
+                "Todavía no existe ninguna acción de creación, actualización o eliminación en Azure."
+            )
+
+            # ============================================================
+            # REVISION FUNCIONAL — SIN ESCRITURA EN AZURE
+            # ============================================================
+            st.markdown("### 👩‍💻 5️⃣ Revisión funcional")
+            st.caption(
+                "Esta etapa permite validar manualmente el CP preparado antes de cualquier futura integración de creación en Azure. "
+                "No realiza POST, PATCH ni DELETE en Azure DevOps."
+            )
+
+            review_product = bool(safe_text(preview.get("Product")))
+            review_module = bool(safe_text(preview.get("Module")))
+            review_description = bool(safe_text(preview.get("Description")))
+            review_expected = bool(safe_text(preview.get("Expected Result")))
+            review_preconditions = bool(safe_text(preview.get("Preconditions")))
+            review_related = bool(safe_text(preview.get("Related Use Case")))
+            review_steps = bool(preview.get("Steps")) and all(
+                safe_text(step.get("Action")) and safe_text(step.get("Expected value"))
+                for step in (preview.get("Steps") or [])
+            )
+
+            review_rows = [
+                {"Validación funcional": "Producto en Description", "Estado": "✅" if review_product else "⚠️"},
+                {"Validación funcional": "Módulo en Description", "Estado": "✅" if review_module else "⚠️"},
+                {"Validación funcional": "Descripción funcional completa", "Estado": "✅" if review_description else "⚠️"},
+                {"Validación funcional": "Resultado esperado en Description", "Estado": "✅" if review_expected else "⚠️"},
+                {"Validación funcional": "Precondiciones en Description", "Estado": "✅" if review_preconditions else "⚠️"},
+                {"Validación funcional": "Caso de uso relacionado identificado", "Estado": "✅" if review_related else "⚠️"},
+                {"Validación funcional": "Steps con Action + Expected", "Estado": "✅" if review_steps else "⚠️"},
+            ]
+            st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
+
+            review_ok = all([
+                review_product, review_module, review_description, review_expected,
+                review_preconditions, review_related, review_steps,
+            ])
+
+            if not review_ok:
+                st.error(
+                    "❌ La revisión funcional no puede aprobarse todavía. "
+                    "Hay elementos que requieren validación funcional."
+                )
+            else:
+                st.success(
+                    "✅ El CP contiene la estructura mínima preparada para revisión funcional. "
+                    "La aprobación sigue siendo manual y no crea el Test Case en Azure."
+                )
+
+            review_decision = st.radio(
+                "Decisión de la revisión funcional",
+                ["Pendiente", "Aprobado funcionalmente", "Requiere ajustes"],
+                key="azure_functional_review_decision",
+                horizontal=True,
+            )
+
+            if review_decision == "Aprobado funcionalmente" and review_ok:
+                st.success(
+                    "🟢 Revisión funcional aprobada. El CP queda preparado como siguiente insumo. "
+                    "No se ha enviado ni creado en Azure DevOps."
+                )
+            elif review_decision == "Requiere ajustes":
+                st.warning(
+                    "🟡 El CP requiere ajustes funcionales. Se mantiene en PREVIEW y no se realiza ninguna escritura en Azure."
+                )
 
 
 
@@ -2840,8 +2537,6 @@ if st.button(
         coverage_metrics = coverage_gate_or_stop(result)
 
         st.session_state.result_json = result
-        st.session_state.azure_reference_preview = None
-        st.session_state.azure_preview_edit_mode = False
         st.session_state.excel_data = create_excel(
             result,
             selected_config,
@@ -2850,6 +2545,11 @@ if st.button(
             result,
             selected_config,
             st.session_state.get("source_name", ""),
+        )
+
+        st.success(
+            f"✅ Generación completada: "
+            f"{len(result['TEST_CASES'])} casos."
         )
 
     except Exception as exc:
@@ -2874,29 +2574,14 @@ if result:
     render_cu_coverage(current_coverage)
 
     # ========================================================
-    # REVISIÓN FUNCIONAL EN EL EDITOR EXISTENTE
-    # ========================================================
-    # El botón para preparar el CP permanece en la sección "Test Case de referencia".
-    # Una vez generado el PREVIEW, los CP se cargan en result["TEST_CASES"] y
-    # se muestran/editarán en la misma sección "✏️ Editar caso de prueba".
-
-    # ========================================================
     # EDITOR DE CASOS DE PRUEBA — EXPERIENCIA TIPO AZURE
     # V13: un CU por Test Case + eliminar CP
     # ========================================================
     st.subheader("✏️ Editar caso de prueba")
-    if st.session_state.get("azure_reference_preview"):
-        st.info(
-            "🔎 Revisión funcional: los CP generados desde la HU se muestran aquí mismo. "
-            "Usa el selector para revisar y ajustar uno por uno todos los CP generados. "
-            "La estructura se basa en el Test Case de referencia de Azure. "
-            "Los cambios quedan en PREVIEW y todavía NO modifican Azure."
-        )
-    else:
-        st.caption(
-            "Revisa y ajusta el caso antes de descargar Excel/PDF. "
-            "Cada Test Case debe conservar un único Caso de Uso relacionado."
-        )
+    st.caption(
+        "Revisa y ajusta el caso antes de descargar Excel/PDF. "
+        "Cada Test Case debe conservar un único Caso de Uso relacionado."
+    )
 
     case_options = []
     for idx, tc in enumerate(result.get("TEST_CASES", [])):
@@ -2951,6 +2636,49 @@ if result:
             except Exception as exc:
                 st.error(f"❌ No se pudo guardar el cambio: {exc}")
 
+        st.divider()
+        st.markdown("### 🗑️ Eliminar caso de prueba")
+
+        st.warning(
+            "Esta acción elimina el Test Case seleccionado de la generación actual "
+            "y también elimina su relación en COVERAGE. No elimina otros casos."
+        )
+
+        confirm_delete = st.checkbox(
+            f"Confirmo que quiero eliminar {selected_case_id}",
+            key=f"v13_confirm_delete_{selected_index}",
+        )
+
+        if st.button(
+            "🗑️ Eliminar CP seleccionado",
+            type="secondary",
+            disabled=not confirm_delete,
+            key=f"v13_delete_cp_{selected_index}",
+        ):
+            deleted_id = selected_case_id
+            # Simular eliminación antes de aplicarla para preservar 1 CP mínimo por CU.
+            candidate_cases = [
+                tc for i, tc in enumerate(result.get("TEST_CASES", []))
+                if i != selected_index
+            ]
+            deletion_coverage = calculate_cu_coverage(
+                candidate_cases,
+                result.get("USE_CASES", [])
+            )
+
+            if not deletion_coverage["valid"]:
+                st.error(
+                    "🚫 No se puede eliminar este CP porque dejaría al menos un CU sin cobertura."
+                )
+            elif delete_test_case(result, selected_index):
+                st.session_state.excel_data = create_excel(result, selected_config)
+                st.session_state.pdf_data = create_pdf(
+                    result,
+                    selected_config,
+                    st.session_state.get("source_name", ""),
+                )
+                st.success(f"✅ {deleted_id} eliminado.")
+                st.rerun()
     else:
         st.info("No hay Test Cases para editar.")
 
@@ -2970,262 +2698,6 @@ if result:
         st.error(
             "🚫 Descargas deshabilitadas: la cobertura mínima por CU no se cumple."
         )
-
-    # ========================================================
-    st.subheader("🧪 Casos generados")
-
-    preview_rows = []
-
-    for tc in result["TEST_CASES"]:
-        preview_rows.append({
-            "ID": safe_text(tc.get("ID")),
-            "Title": build_case_title(
-                tc,
-                normalize_case_id(
-                    tc.get("ID"),
-                    safe_text(tc.get("Module"), "GENERAL"),
-                    len(preview_rows) + 1,
-                    EXCEL_CONFIGS[selected_config]["title_prefix"],
-                ),
-            ),
-            "Module": safe_text(tc.get("Module")),
-            "Scenario Type": safe_text(tc.get("Scenario Type")),
-            "Steps": len(safe_steps(tc)),
-        })
-
-    st.dataframe(
-        pd.DataFrame(preview_rows),
-        width="stretch",
-    )
-
-    st.markdown("---")
-    st.info("🔄 **Sincronización con Azure DevOps:** revisa los CP generados arriba y luego selecciona cuáles cargar, el Test Plan y la Suite destino.")
-    # CARGA CONTROLADA EN AZURE — DOS PASOS
-    # ========================================================
-    st.divider()
-    st.subheader("🚀 Cargar CP en Azure DevOps")
-    st.caption(
-        "La creación real ocurre únicamente después de seleccionar CP, Test Plan y Suite "
-        "y confirmar explícitamente el resumen."
-    )
-
-    publish_cases = result.get("TEST_CASES", []) or []
-    publish_case_map = {safe_text(tc.get("ID")): tc for tc in publish_cases if safe_text(tc.get("ID"))}
-
-    st.markdown("### 1️⃣ Seleccionar CP y destino")
-    selection_mode = st.radio(
-        "Casos a cargar",
-        ["Un solo CP", "Seleccionar varios CP", "Todos los CP"],
-        horizontal=True,
-        key="azure_publish_selection",
-    )
-    selected_publish_ids = []
-    labels = list(publish_case_map.keys())
-    if selection_mode == "Un solo CP":
-        if labels:
-            chosen = st.selectbox(
-                "CP a cargar",
-                labels,
-                format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
-                key="azure_publish_single_case",
-            )
-            selected_publish_ids = [chosen]
-    elif selection_mode == "Seleccionar varios CP":
-        selected_publish_ids = st.multiselect(
-            "Selecciona los CP que deseas cargar",
-            labels,
-            format_func=lambda x: f"{x} — {build_case_title(publish_case_map[x], x)[:100]}",
-            key="azure_publish_multi_cases",
-        )
-    else:
-        selected_publish_ids = labels
-        st.info(f"Se cargarán los {len(selected_publish_ids)} CP generados actualmente.")
-
-    target_plans = st.session_state.get("azure_reference_plans", []) or []
-    target_plan = None
-    target_suite = None
-    duplicate_titles = []
-
-    if not target_plans:
-        st.warning("⚠️ Primero consulta los 10 Test Plans más recientes para seleccionar el destino.")
-    else:
-        plan_labels = [f"{p.get('id')} — {_ui_text(p.get('name'), 'Sin nombre')}" for p in target_plans]
-        plan_label = st.selectbox("Test Plan destino", plan_labels, key="azure_publish_target_plan")
-        target_plan = target_plans[plan_labels.index(plan_label)]
-        target_plan_id = str(target_plan.get("id"))
-
-        if st.session_state.get("azure_target_plan_id") != target_plan_id:
-            st.session_state.azure_target_plan_id = target_plan_id
-            st.session_state.azure_target_suite_id = None
-            st.session_state.azure_target_suites = []
-            try:
-                with st.spinner("Consultando Suites del Test Plan destino..."):
-                    st.session_state.azure_target_suites = list_test_suites(target_plan_id)
-            except Exception as exc:
-                st.session_state.azure_target_suites = []
-                st.error(f"❌ No se pudieron consultar las Suites del destino: {exc}")
-
-        target_suites = st.session_state.get("azure_target_suites", []) or []
-        if target_suites:
-            suite_labels = [f"{s.get('id')} — {_ui_text(s.get('name'), 'Suite sin nombre')}" for s in target_suites]
-            suite_label = st.selectbox("Suite destino", suite_labels, key="azure_publish_target_suite")
-            target_suite = target_suites[suite_labels.index(suite_label)]
-            st.session_state.azure_target_suite_id = str(target_suite.get("id"))
-        else:
-            st.warning("⚠️ El Test Plan seleccionado no tiene Suites consultables.")
-
-        # Campos obligatorios específicos del proyecto.
-        st.markdown("### Datos obligatorios del proyecto para crear el Test Case")
-        st.caption(
-            "Azure exige estos campos personalizados en este proyecto. "
-            "El Related Work -> Parent del CP se configurará automáticamente con el ID de la Suite destino."
-        )
-        inferred_parent = ""
-        if selected_publish_ids:
-            first_case = publish_case_map.get(selected_publish_ids[0], {})
-            for key in ("IDPadre", "ID Padre", "Parent ID", "ParentId", "parent_id", "id_padre"):
-                candidate = safe_text(first_case.get(key))
-                if candidate:
-                    inferred_parent = candidate
-                    break
-        id_padre_input = st.text_input(
-            "IDPadre (Work Item padre / HU)",
-            value=safe_text(st.session_state.get("azure_id_padre"), inferred_parent),
-            placeholder="Ej. 12345",
-            key="azure_id_padre_input",
-            help="Campo requerido por Azure. No uses el ID del Test Plan ni el de la Suite salvo que ese sea realmente el Work Item padre."
-        )
-        st.session_state.azure_id_padre = id_padre_input.strip()
-        tipo_origen_input = st.text_input(
-            "Tipo Origen Proyecto",
-            value=safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto"),
-            key="azure_tipo_origen_input",
-        )
-        st.session_state.azure_tipo_origen_proyecto = tipo_origen_input.strip() or "Proyecto"
-
-        # Preflight GET para bloquear duplicados antes del POST.
-        if target_suite and selected_publish_ids:
-            try:
-                existing = list_test_cases(target_plan_id, target_suite.get("id"))
-                existing_titles = {
-                    re.sub(r"\s+", " ", safe_text(row.get("title"))).strip().casefold()
-                    for row in existing
-                }
-                for cp_id in selected_publish_ids:
-                    title = build_case_title(publish_case_map[cp_id], cp_id)
-                    if re.sub(r"\s+", " ", title).strip().casefold() in existing_titles:
-                        duplicate_titles.append(cp_id)
-            except Exception as exc:
-                st.warning(f"⚠️ No fue posible validar duplicados antes de la creación: {exc}")
-
-        if duplicate_titles:
-            st.error(
-                "🚫 Se detectaron títulos que ya existen en la Suite destino: "
-                + ", ".join(duplicate_titles)
-                + ". La creación queda bloqueada para evitar duplicados."
-            )
-
-        ready = bool(
-            selected_publish_ids
-            and target_plan
-            and target_suite
-            and not duplicate_titles
-            and safe_text(st.session_state.get("azure_id_padre"))
-            and safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
-        )
-        if selected_publish_ids and target_plan and target_suite and not safe_text(st.session_state.get("azure_id_padre")):
-            st.warning("⚠️ Falta IDPadre. La creación queda bloqueada porque Azure lo exige.")
-        if selected_publish_ids and target_plan and target_suite:
-            if ready:
-                st.success(
-                    f"Destino listo: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
-                    f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
-                    f"CP seleccionados: {len(selected_publish_ids)}"
-                )
-            else:
-                st.info(
-                    f"Destino seleccionado: Test Plan {target_plan.get('id')} — {target_plan.get('name')} | "
-                    f"Suite {target_suite.get('id')} — {target_suite.get('name')} | "
-                    f"CP seleccionados: {len(selected_publish_ids)}. Revisa los datos obligatorios para habilitar la sincronización."
-                )
-
-            st.markdown("### 2️⃣ Revisar y confirmar creación")
-            review_rows = []
-            for cp_id in selected_publish_ids:
-                tc = publish_case_map[cp_id]
-                review_rows.append({
-                    "CP": cp_id,
-                    "Título": build_case_title(tc, cp_id),
-                    "Caso de Uso": safe_text(tc.get("Related Use Case"), "Pendiente"),
-                    "Steps": len(safe_steps(tc)),
-                })
-            st.dataframe(pd.DataFrame(review_rows), width="stretch", hide_index=True)
-            st.warning(
-                "⚠️ La sincronización modifica Azure DevOps: crea los Test Cases y los asocia a la Suite seleccionada."
-            )
-
-            # El botón se muestra siempre que exista una selección y un destino.
-            # Si falta un dato obligatorio o hay duplicados, queda bloqueado en vez de desaparecer.
-            can_sync = bool(
-                selected_publish_ids
-                and target_plan
-                and target_suite
-                and not duplicate_titles
-                and safe_text(st.session_state.get("azure_id_padre"))
-                and safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
-            )
-            if not safe_text(st.session_state.get("azure_id_padre")):
-                st.warning("⚠️ Completa IDPadre para habilitar la sincronización.")
-            if duplicate_titles:
-                st.error("🚫 La sincronización está bloqueada porque existen CP con títulos duplicados en la Suite destino.")
-            if not target_suite:
-                st.warning("⚠️ Selecciona una Suite destino para habilitar la sincronización.")
-
-            confirm = st.checkbox(
-                "Confirmo que los CP, Test Plan, Suite, IDPadre y Tipo Origen Proyecto son correctos y autorizo la creación en Azure.",
-                key="azure_publish_confirm",
-            )
-            if st.button(
-                "🔄 Sincronizar con Azure DevOps",
-                type="primary",
-                disabled=not (can_sync and confirm),
-                key="azure_publish_execute",
-                help="Crea los CP seleccionados en Azure y los asocia a la Suite elegida.",
-            ):
-                try:
-                    selected_cases = []
-                    id_padre = safe_text(st.session_state.get("azure_id_padre"))
-                    tipo_origen = safe_text(st.session_state.get("azure_tipo_origen_proyecto"), "Proyecto")
-                    for cp_id in selected_publish_ids:
-                        # Copia el CP para no alterar la estructura original de la revisión.
-                        tc = dict(publish_case_map[cp_id])
-                        # Azure exige estos campos personalizados en el Work Item.
-                        tc["IDPadre"] = id_padre
-                        tc["Tipo Origen Proyecto"] = tipo_origen
-                        selected_cases.append(tc)
-                    with st.spinner(f"Sincronizando {len(selected_cases)} Test Case(s) con Azure DevOps..."):
-                        publish_result = create_selected_cases_in_azure(selected_cases, target_plan, target_suite)
-                    st.session_state.azure_publish_results = publish_result
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"❌ No se pudo completar la sincronización con Azure: {exc}")
-
-    publish_result = st.session_state.get("azure_publish_results")
-    if publish_result:
-        st.markdown("### 📌 Resultado de la creación en Azure")
-        if publish_result.get("created"):
-            rows = [
-                {
-                    "CP generado": row.get("cp_id"),
-                    "Azure ID": row.get("azure_id"),
-                    "Estado": row.get("status"),
-                }
-                for row in publish_result["created"]
-            ]
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-            st.success(f"✅ {len(rows)} CP procesados en Azure.")
-        for err in publish_result.get("errors", []):
-            st.error(f"❌ {err.get('cp_id')}: {err.get('error')}")
 
     # IMPORTANTE: el Excel se reconstruye SIEMPRE con el estado actual de
     # `result`, después de aplicar cualquier edición realizada en el editor.
@@ -3261,3 +2733,28 @@ if result:
     with st.expander("🔎 Ver JSON generado", expanded=False):
         st.json(result)
 
+    st.subheader("🧪 Casos generados")
+
+    preview_rows = []
+
+    for tc in result["TEST_CASES"]:
+        preview_rows.append({
+            "ID": safe_text(tc.get("ID")),
+            "Title": build_case_title(
+                tc,
+                normalize_case_id(
+                    tc.get("ID"),
+                    safe_text(tc.get("Module"), "GENERAL"),
+                    len(preview_rows) + 1,
+                    EXCEL_CONFIGS[selected_config]["title_prefix"],
+                ),
+            ),
+            "Module": safe_text(tc.get("Module")),
+            "Scenario Type": safe_text(tc.get("Scenario Type")),
+            "Steps": len(safe_steps(tc)),
+        })
+
+    st.dataframe(
+        pd.DataFrame(preview_rows),
+        width="stretch",
+    )
