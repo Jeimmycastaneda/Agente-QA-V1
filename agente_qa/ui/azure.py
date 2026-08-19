@@ -6,7 +6,9 @@ de cualquier escritura.
 """
 from __future__ import annotations
 
+import os
 import streamlit as st
+
 from agente_qa.integrations.azure_devops import (
     AzureDevOpsConfig,
     AzureDevOpsApiError,
@@ -18,8 +20,32 @@ from agente_qa.integrations.azure_devops import (
 )
 
 
-def _cfg():
-    return AzureDevOpsConfig.from_env()
+def _secret_or_env(secret_name: str, env_name: str | None = None) -> str:
+    env_name = env_name or secret_name
+    try:
+        value = st.secrets.get(secret_name, "")
+    except Exception:
+        value = ""
+    return str(value or os.getenv(env_name, "")).strip()
+
+
+def _cfg() -> AzureDevOpsConfig:
+    """Construye la configuración desde Streamlit Secrets o variables de entorno.
+
+    Esto conserva el comportamiento de main en Streamlit Cloud sin acoplar el
+    módulo HTTP a Streamlit.
+    """
+    organization = _secret_or_env("AZURE_DEVOPS_ORG", "AZDO_ORGANIZATION")
+    project = _secret_or_env("AZURE_DEVOPS_PROJECT", "AZDO_PROJECT")
+    pat = _secret_or_env("AZURE_DEVOPS_PAT", "AZDO_PAT")
+    enabled_value = _secret_or_env("AZDO_ENABLED")
+    enabled = enabled_value.lower() in {"1", "true", "yes", "si", "sí"} or bool(pat)
+    return AzureDevOpsConfig(
+        organization=organization,
+        project=project,
+        pat=pat,
+        enabled=enabled,
+    )
 
 
 def render_azure_section():
@@ -88,6 +114,8 @@ def render_azure_section():
     ):
         try:
             cfg = _cfg()
+            if not cfg.enabled:
+                raise AzureDevOpsApiError("Azure DevOps está deshabilitado. Configura AZDO_ENABLED=true o un PAT válido.")
             created, ids = [], []
             resolved_parent = st.session_state.azure_id_padre.strip()
             for tc in selected_cases:
