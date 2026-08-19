@@ -44,7 +44,7 @@ def _json_from_response(text: str) -> dict:
 
 
 class GeminiProvider(QAProvider):
-    def __init__(self, api_key: str, model: str | None = None, max_retries: int = 1):
+    def __init__(self, api_key: str, model: str | None = None, max_retries: int = 1, retry_wait_seconds: int = 10):
         if genai is None:
             raise RuntimeError("No está instalada la librería google-genai.")
         if not api_key:
@@ -60,6 +60,7 @@ class GeminiProvider(QAProvider):
         self.models = tuple(candidates)
         self.model = self.models[0]
         self.max_retries = max(0, int(max_retries))
+        self.retry_wait_seconds = max(1, int(retry_wait_seconds))
 
     def _generate_once(self, model: str, full_prompt: str):
         config = types.GenerateContentConfig(
@@ -101,10 +102,8 @@ class GeminiProvider(QAProvider):
                     quota = "429" in detail or "quota" in lower or "resource exhausted" in lower
                     retryable = quota or any(x in lower for x in ("500", "503", "internal", "unavailable", "timeout", "deadline"))
                     if retryable and attempt < self.max_retries and not quota:
-                        time.sleep(2 * (attempt + 1))
+                        time.sleep(self.retry_wait_seconds * (attempt + 1))
                         continue
-                    # Cuota, modelo no disponible, request inválido o error de esquema:
-                    # abandonar este modelo y probar el siguiente sin insistir.
                     break
 
         raise RuntimeError(
