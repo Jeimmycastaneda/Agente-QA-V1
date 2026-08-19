@@ -371,11 +371,11 @@ Utilizar saltos de línea reales.
 
 NO utilizar:
 
-\n
+\\n
 
 /n
 
-\r
+\\r
 
 como texto visible.
 
@@ -457,7 +457,7 @@ No pipes.
 
 No /n.
 
-No \n literal.
+No \\n literal.
 
 No escapes visibles.
 
@@ -551,6 +551,69 @@ Otra Suite:
 CP-AC-[SIGLAS_NUEVA_SUITE]-00001 ...
 
 No reutilizar el código de Suite de otra Suite.
+
+============================================================
+REGLA 19 — DELEGACIÓN PARA NUEVAS COTIZACIONES DE COLECTIVOS
+============================================================
+
+Cuando la fuente funcional indique que una NUEVA COTIZACIÓN de Autos Colectivos
+debe realizar el proceso de delegación definido en RENK 189 — Evaluación de
+Delegación, la generación de CP debe considerar esta validación como una
+funcionalidad diferenciada cuando el proceso tenga reglas o resultados propios.
+
+El CP debe validar que la nueva cotización ejecute el proceso de delegación
+definido en RENK 189, respetando únicamente las reglas, condiciones, perfiles,
+parametrizaciones, decisiones y resultados documentados en la fuente.
+
+Si el proceso de delegación tiene una condición, decisión, resultado o flujo
+funcional diferente al resto de la creación de la cotización, generar un CP
+independiente para la delegación, manteniendo como Related Use Case únicamente
+el CU que origina esa validación.
+
+No inventar reglas de delegación que no estén documentadas.
+
+Si RENK 189 es mencionado como referencia pero sus reglas necesarias no están
+disponibles en la fuente, generar la alerta correspondiente y no completar la
+regla por inferencia.
+
+============================================================
+REGLA 20 — COTIZACIÓN DE NUEVAS COTIZACIONES DE COLECTIVOS
+============================================================
+
+Cuando la fuente funcional indique que una NUEVA COTIZACIÓN de Autos Colectivos
+debe realizar el proceso de cotización definido en RENK202 — MODIFICACIONES POR
+SUSCRIPTOR — CU-304, la generación de CP debe validar dicho proceso como parte
+de la funcionalidad de la nueva cotización.
+
+Si el proceso definido en RENK202/CU-304 contiene reglas, cálculos, fuentes,
+condiciones, parámetros, comportamientos o resultados diferenciados, generar
+un CP independiente para validar el proceso de cotización.
+
+El CP debe conservar la trazabilidad con el CU que origina la nueva cotización
+y debe describir los pasos necesarios para ejecutar y comprobar el proceso de
+cotización, utilizando únicamente la información documentada.
+
+No inventar reglas del proceso de cotización de RENK202/CU-304.
+
+Si las reglas necesarias de RENK202/CU-304 no están disponibles en la fuente,
+generar la alerta correspondiente y no completar la prueba por inferencia.
+
+============================================================
+REGLA 21 — PRIORIDAD DE SEPARACIÓN DE ESTAS VALIDACIONES
+============================================================
+
+Cuando una nueva cotización de Autos Colectivos contenga simultáneamente:
+
+- proceso de delegación de RENK 189; y
+- proceso de cotización de RENK202 — MODIFICACIONES POR SUSCRIPTOR — CU-304;
+
+deben analizarse como validaciones funcionales independientes cuando sus
+reglas, flujo, condiciones o resultados sean diferenciados.
+
+No consolidar ambos procesos en un único CP si hacerlo provoca que se pierda
+la trazabilidad o la validación específica de alguno de ellos.
+
+Cada CP debe mantener exactamente un Related Use Case.
 
 ============================================================
 FIN DE AJUSTES VIGENTES
