@@ -1,0 +1,13 @@
+ID
+Work Item Type
+Title
+Description
+Test Step
+Step Action
+Step Expected
+Area Path
+IDPadre
+Tipo Origen Proyecto
+Tiempo Real
+Assigned To
+State
