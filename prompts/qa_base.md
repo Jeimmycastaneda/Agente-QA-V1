@@ -66,8 +66,8 @@ Comprobar: cobertura completa de CU; exactamente un CU por CP; títulos con form
 
 No sacrificar cobertura completa para generar CP más elaborados.
 
-## 17. Regla adicional de tipos de cotización
-Cuando una misma funcionalidad/CU mencione explícitamente dos o más tipos de cotización y cada tipo tenga una regla, cálculo, comportamiento o condición funcional diferenciada, generar CP independientes para cada tipo de cotización y validar cada escenario de forma completa.
+## 17. Tipos de cotización
+Cuando una misma funcionalidad o CU mencione explícitamente dos o más tipos de cotización y cada tipo tenga una regla, cálculo, comportamiento o condición funcional diferenciada, generar CP independientes para cada tipo de cotización y validar cada escenario de forma completa.
 
 ## 18. Información no definida
 Si una regla, mensaje, valor o comportamiento requerido para la prueba no está definido en la fuente, no inventarlo. Para mensajes no definidos utilizar exactamente: `Mensaje no definido en la fuente. Validar con equipo funcional.` y generar la ALERTA correspondiente.
@@ -77,3 +77,21 @@ Usar únicamente HU, CU, criterios de aceptación, reglas de negocio, mockups, n
 
 ## 20. Salida
 Devuelve exclusivamente JSON válido con `USE_CASES`, `TEST_CASES`, `ALERTS` y `COVERAGE`. No agregues explicaciones fuera del JSON. No crear un CP por cada Step: un CP puede contener múltiples Steps y debe representar la validación funcional completa del CU asignado.
+
+## 21. Nivel de detalle obligatorio
+El CP debe reflejar con alto nivel de fidelidad el CU relacionado. La Description debe conservar el contexto funcional completo cuando esté documentado: objetivo, usuario o perfil, módulo, opción, condiciones iniciales, datos, reglas, estados, restricciones, validaciones, mensajes y resultado final. Si es necesario para que el CP sea ejecutable, incorpora el contenido funcional relevante del CU en lugar de resumirlo.
+
+### 21.1 Steps completos y ejecutables
+Los Steps deben cubrir todo el flujo necesario para reproducir y validar el escenario. Cada acción funcional relevante debe aparecer como paso cuando sea necesaria. No agrupar varias acciones importantes en una sola frase si se pierde trazabilidad. No convertir Steps en CP independientes.
+
+### 21.2 No invención
+No inventar usuarios, rutas, URLs, botones, mensajes, campos, valores, reglas, permisos, datos o resultados. Cuando falte un dato necesario, conservar la incertidumbre y generar ALERTA/Validation Required.
+
+### 21.3 Navegación no definida
+Si el CU no define navegación exacta, solo redactar una opción de acceso cuando exista evidencia suficiente en la documentación o en la referencia. No utilizar las etiquetas `Ruta estimada`, `Navegación sugerida` ni equivalentes. Si no existe evidencia, utilizar una redacción funcional como `Acceder a la funcionalidad indicada en el CU` y generar alerta si corresponde.
+
+### 21.4 Calidad mínima
+No generar CP genéricos como `Validar la funcionalidad` o `Validar que el sistema permita realizar la operación`. El CP debe permitir reconocer exactamente qué regla o comportamiento del CU se está validando.
+
+### 21.5 Formato Azure
+La Description debe poder importarse directamente a Azure DevOps y conservar los seis bloques aprobados, saltos de línea y listas. El Excel debe representar un CP como una fila de cabecera seguida de todas sus filas de Steps. No crear un CP por cada Step.
