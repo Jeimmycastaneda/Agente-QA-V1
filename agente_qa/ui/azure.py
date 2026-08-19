@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import streamlit as st
 from agente_qa.integrations.azure_devops import (
-    AzureDevOpsConfig, AzureDevOpsApiError, AzureDevOpsConfigError,
-    list_test_plans, list_test_suites, list_test_cases,
-    create_test_case, add_parent_relation_to_work_item,
+    AzureDevOpsConfig,
+    AzureDevOpsApiError,
+    list_test_plans,
+    list_test_suites,
+    create_test_case,
+    add_parent_relation_to_work_item,
     add_test_cases_to_suite,
 )
 
@@ -24,15 +27,14 @@ def render_azure_section():
     st.subheader("🚀 Cargar CP en Azure DevOps")
     st.caption("La escritura ocurre únicamente después de selección y confirmación explícita.")
 
-    if not st.button("🔄 Consultar Test Plans", key="azure_refresh_plans"):
-        if not st.session_state.get("azure_plans"):
-            st.info("Consulta los Test Plans para comenzar. La consulta es solo de lectura.")
-    else:
+    if st.button("🔄 Consultar Test Plans", key="azure_refresh_plans"):
         try:
             st.session_state.azure_plans = list_test_plans(_cfg(), limit=10)
             st.session_state.azure_suites = []
         except Exception as exc:
             st.error(f"No fue posible consultar Test Plans: {exc}")
+    elif not st.session_state.get("azure_plans"):
+        st.info("Consulta los Test Plans para comenzar. La consulta es solo de lectura.")
 
     plans = st.session_state.get("azure_plans", [])
     if not plans:
@@ -78,20 +80,43 @@ def render_azure_section():
         "Confirmo que quiero crear los Test Cases seleccionados y asociarlos a esta Suite.",
         key="azure_confirm_upload",
     )
-    if st.button("🚀 Crear y asociar CP", type="primary", disabled=not confirm or not selected_cases, key="azure_create_cases"):
+    if st.button(
+        "🚀 Crear y asociar CP",
+        type="primary",
+        disabled=not confirm or not selected_cases,
+        key="azure_create_cases",
+    ):
         try:
             cfg = _cfg()
-            created, ids, errors = [], [], []
+            created, ids = [], []
+            resolved_parent = st.session_state.azure_id_padre.strip()
             for tc in selected_cases:
-                wi = create_test_case(tc, cfg, parent_id=st.session_state.azure_id_padre or tc.get("IDPadre"), area_path=plan.get("area_path"))
+                case_parent = str(tc.get("IDPadre", "")).strip() or resolved_parent
+                wi = create_test_case(
+                    tc,
+                    cfg,
+                    parent_id=case_parent,
+                    area_path=plan.get("area_path"),
+                )
                 wid = wi.get("id")
                 if not wid:
                     raise AzureDevOpsApiError("Azure no devolvió el ID del Work Item creado.")
-                created.append({"cp_id": tc.get("ID"), "azure_id": wid, "title": tc.get("Title")})
+
+                if case_parent:
+                    add_parent_relation_to_work_item(wid, case_parent, cfg)
+
+                created.append({
+                    "cp_id": tc.get("ID"),
+                    "azure_id": wid,
+                    "title": tc.get("Title"),
+                    "parent_id": case_parent,
+                })
                 ids.append(wid)
+
             add_test_cases_to_suite(plan["id"], suite["id"], ids, cfg)
-            st.success(f"✅ {len(created)} CP creados y asociados a la Suite {suite.get('id')}.")
+            st.success(f"✅ {len(created)} CP creados, asociados a la Suite {suite.get('id')} y vinculados al Parent informado.")
             st.session_state.azure_upload_result = created
+            st.session_state.azure_confirm_upload = False
         except Exception as exc:
             st.error(f"❌ Error durante la carga a Azure: {exc}")
 
