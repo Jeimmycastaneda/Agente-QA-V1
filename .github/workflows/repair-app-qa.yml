@@ -1,0 +1,198 @@
+name: Reparar app QA y ajustar rutas/sincronizacion
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Restaurar app.py anterior y aplicar ajustes
+        run: |
+          set -e
+          git checkout HEAD^ -- app.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          # Route en el esquema JSON.
+          if '"Route": {"type": "string"}' not in s:
+              s = s.replace('"Validation Method": {"type": "string"},\n                    "Steps": {', '"Validation Method": {"type": "string"},\n                    "Route": {"type": "string"},\n                    "Steps": {', 1)
+
+          # Regla obligatoria de rutas y descomposición funcional.
+          old_prompt = '"Cuando la navegación no esté definida explícitamente, puedes redactar una opción posible de acceso "\n        "solo si existe evidencia suficiente en la documentación. No uses las etiquetas Ruta estimada o "\n        "Navegación sugerida, no inventes botones, URLs, menús, pantallas ni rutas, y conserva siempre las "\n        "características funcionales y reglas sustentadas en la fuente.\\n"'
+          new_prompt = '"RUTA FUNCIONAL OBLIGATORIA: cada CP debe devolver el campo Route con la ruta funcional completa y descriptiva sustentada por la fuente. La ruta también debe aparecer dentro de Description y en los primeros Steps, de forma ejecutable. No uses las etiquetas Ruta estimada o Navegación sugerida. Si la fuente no define una ruta exacta, redacta únicamente el acceso funcional que sí esté sustentado. No inventes botones, URLs, menús, pantallas ni rutas.\\n"'
+          if old_prompt in s:
+              s = s.replace(old_prompt, new_prompt, 1)
+
+          # Funciones de postproceso de ruta y sincronización Azure.
+          marker = 'def generate_qa_data(\n'
+          helper = r'''def _ensure_functional_route(tc):
+    """Garantiza que la ruta funcional quede visible en Description y Steps sin inventarla."""
+    if not isinstance(tc, dict):
+        return tc
+    description = safe_text(tc.get("Description"))
+    route = safe_text(tc.get("Route"))
+    if not route:
+        m = re.search(r"(?is)(?:ingresar|acceder|seleccionar|consultar|dirigirse|navegar|ingreso).*?(?=\.|\n|$)", description)
+        if m:
+            route = re.sub(r"\s+", " ", m.group(0)).strip(" .")
+    if route:
+        tc["Route"] = route
+        if route.lower() not in description.lower():
+            tc["Description"] = f"{route}.\n\n{description}" if description else route
+        steps = tc.get("Steps")
+        if not isinstance(steps, list):
+            steps = []
+            tc["Steps"] = steps
+        if not any(route.lower() in safe_text(st.get("Action")).lower() for st in steps if isinstance(st, dict)):
+            steps.insert(0, {"Step #": 1, "Action": route, "Expected value": "El sistema permite acceder a la funcionalidad correspondiente y continuar con la validación del escenario definido en el caso de prueba."})
+            for i, st in enumerate(steps, 1):
+                if isinstance(st, dict):
+                    st["Step #"] = i
+    return tc
+
+def ensure_functional_routes(data):
+    for tc in data.get("TEST_CASES", []) or []:
+        _ensure_functional_route(tc)
+    return data
+
+def _az_request_json(url, pat, method, payload, content_type="application/json"):
+    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(url, method=method, data=body, headers={"Authorization": f"Basic {token}", "Accept": "application/json", "Content-Type": content_type, "User-Agent": "Agente-QA-Streamlit/1.0"})
+    try:
+        with urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except HTTPError as exc:
+        detail = ""
+        try: detail = exc.read().decode("utf-8", errors="replace")[:1800]
+        except Exception: pass
+        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
+    except URLError as exc:
+        raise AzureDevOpsError(f"No fue posible comunicarse con Azure DevOps: {exc.reason}") from exc
+
+def _steps_to_azure_xml(steps):
+    rows = []
+    for i, step in enumerate(steps or [], 1):
+        action = escape(safe_text(step.get("Action")))
+        expected = escape(safe_text(step.get("Expected value")))
+        rows.append(f'<step id="{i}" type="ValidateStep"><parameterizedString isformatted="true">{action}</parameterizedString><parameterizedString isformatted="true">{expected}</parameterizedString><description/></step>')
+    return f'<steps id="0" last="{len(rows)}">{"".join(rows)}</steps>'
+
+def create_azure_test_case(tc):
+    cfg = _az_config(); _az_validate(cfg)
+    title = build_case_title(tc, safe_text(tc.get("ID"), "CP"))
+    description = format_description_for_azure(build_azure_description(tc.get("Product"), tc.get("Module"), tc.get("Description"), tc.get("Expected Result"), tc.get("Preconditions"), tc.get("Related Use Case")))
+    fields = [
+        {"op": "add", "path": "/fields/System.Title", "value": title},
+        {"op": "add", "path": "/fields/System.Description", "value": description},
+        {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": _steps_to_azure_xml(safe_steps(tc))},
+    ]
+    area = safe_text(next(iter(EXCEL_CONFIGS.values())).get("area_path"))
+    if area: fields.append({"op": "add", "path": "/fields/System.AreaPath", "value": area})
+    url = f"https://dev.azure.com/{quote(cfg['org'], safe='')}/{quote(cfg['project'], safe='')}/_apis/wit/workitems/$Test%20Case?api-version=7.1"
+    return _az_request_json(url, cfg["pat"], "POST", fields, "application/json-patch+json")
+
+def add_test_case_to_suite(plan_id, suite_id, work_item_id):
+    cfg = _az_config(); _az_validate(cfg)
+    url = _az_testplan_url(cfg, f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase") + "?api-version=7.1"
+    return _az_request_json(url, cfg["pat"], "POST", [{"workItem": {"id": int(work_item_id)}}])
+
+def sync_cases_to_test_suite(result, plan_id, suite_id, selected_indexes=None):
+    cases = result.get("TEST_CASES", []) or []
+    indexes = list(range(len(cases))) if selected_indexes is None else list(selected_indexes)
+    synced = []
+    for idx in indexes:
+        tc = cases[idx]
+        created = create_azure_test_case(tc)
+        wid = created.get("id")
+        if not wid: raise AzureDevOpsError(f"Azure creó el CP pero no devolvió ID para {safe_text(tc.get('ID'))}.")
+        add_test_case_to_suite(plan_id, suite_id, wid)
+        synced.append({"local_id": safe_text(tc.get("ID")), "azure_id": wid, "title": build_case_title(tc, safe_text(tc.get("ID")))})
+    return synced
+
+
+'''
+          if 'def _ensure_functional_route' not in s:
+              if marker not in s: raise SystemExit('No se encontró generate_qa_data')
+              s = s.replace(marker, helper + marker, 1)
+
+          # Ejecutar postproceso después de resolver CU.
+          if '_resolve_related_use_cases(validated, source_content)\n                ensure_functional_routes(validated)' not in s:
+              s = s.replace('_resolve_related_use_cases(validated, source_content)\n                validate_minimum_cu_coverage(validated)', '_resolve_related_use_cases(validated, source_content)\n                ensure_functional_routes(validated)\n                validate_minimum_cu_coverage(validated)', 1)
+
+          # UI de sincronización, ubicada después de generar result_json.
+          anchor = 'result = st.session_state.result_json\n\nif result:\n'
+          if '🔄 Sincronizar CP con Test Plan' not in s:
+              ui = r'''result = st.session_state.result_json
+
+st.divider()
+st.subheader("🔄 Sincronizar CP con Test Plan")
+if result:
+    st.caption("Selecciona el Test Plan y la Suite destino. La sincronización crea los Test Cases en Azure DevOps y los agrega a la Suite seleccionada. No elimina CP existentes.")
+    sync_plans = st.session_state.get("azure_reference_plans", [])
+    if not sync_plans:
+        st.info("Consulta primero los Test Plans para habilitar la selección del destino.")
+    else:
+        sync_plan_options = [f"{_ui_text(p.get('id'), 'SIN ID')} — {_ui_text(p.get('name'), 'Test Plan sin nombre')}" for p in sync_plans]
+        sync_plan_label = st.selectbox("Test Plan destino", sync_plan_options, key="azure_sync_plan_select")
+        sync_plan_id = sync_plans[sync_plan_options.index(sync_plan_label)].get("id")
+        sync_suites = st.session_state.get("azure_reference_suites", [])
+        if st.session_state.get("azure_reference_plan_id") != sync_plan_id:
+            st.warning("Consulta las Suites del Test Plan seleccionado para habilitar el destino.")
+        elif not sync_suites:
+            st.info("Consulta las Suites del Test Plan seleccionado.")
+        else:
+            sync_suite_options = [f"{_ui_text(s.get('id'), 'SIN ID')} — {_ui_text(s.get('name'), 'Suite sin nombre')}" for s in sync_suites]
+            sync_suite_label = st.selectbox("Suite destino", sync_suite_options, key="azure_sync_suite_select")
+            sync_suite_id = sync_suites[sync_suite_options.index(sync_suite_label)].get("id")
+            sync_cases = result.get("TEST_CASES", []) or []
+            sync_labels = [f"{safe_text(tc.get('ID'), f'CP-{i+1:05d}')} — {build_case_title(tc, safe_text(tc.get('ID'), 'CP'))[:100]}" for i, tc in enumerate(sync_cases)]
+            selected_sync_labels = st.multiselect("CP a sincronizar", sync_labels, default=sync_labels, key="azure_sync_case_select")
+            selected_sync_indexes = [sync_labels.index(x) for x in selected_sync_labels]
+            confirm_sync = st.checkbox("Confirmo que deseo crear estos CP en Azure DevOps y asociarlos a la Suite seleccionada.", key="azure_sync_confirm")
+            if st.button("🚀 Sincronizar CP con Test Plan / Suite", type="primary", disabled=(not confirm_sync or not selected_sync_indexes), key="azure_sync_cases"):
+                try:
+                    with st.spinner("Creando Test Cases y asociándolos a la Suite seleccionada..."):
+                        synced = sync_cases_to_test_suite(result, sync_plan_id, sync_suite_id, selected_sync_indexes)
+                    st.success(f"✅ {len(synced)} CP sincronizados correctamente con la Suite seleccionada.")
+                    st.dataframe(pd.DataFrame(synced), width="stretch", hide_index=True)
+                except AzureDevOpsError as exc:
+                    st.error(f"❌ No se pudieron sincronizar los CP: {exc}")
+                except Exception as exc:
+                    st.error(f"❌ Error inesperado durante la sincronización: {exc}")
+
+if result:
+'''
+              if anchor not in s: raise SystemExit('No se encontró result anchor')
+              s=s.replace(anchor,ui,1)
+
+          p.write_text(s,encoding='utf-8')
+          PY
+          python -m py_compile app.py
+
+      - name: Commit reparación
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Restaurar app y ajustar rutas y sincronizacion Azure" || true
+          git push
+
+      - name: Eliminar workflow temporal
+        if: always()
+        run: |
+          git rm .github/workflows/repair-app-qa.yml || true
+          git commit -m "Eliminar workflow temporal de reparación" || true
+          git push || true
