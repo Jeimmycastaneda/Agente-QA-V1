@@ -1,0 +1,10 @@
+# Valores funcionales heredados de main
+WORK_ITEM_TYPE=Test Case
+STATE=Design
+ID_PADRE=
+TIEMPO_REAL=
+AREA_PATH=COTIZADORES WEB\DESARROLLO
+ASSIGNED_TO=
+PRODUCTO=Cotizadores Web
+MODULO=Cotizador Autos Colectivos
+TIPO_ORIGEN_PROYECTO=Proyecto
