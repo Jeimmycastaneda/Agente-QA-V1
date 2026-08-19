@@ -1,0 +1,274 @@
+name: Integrar sincronizacion Azure en main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Integrar funciones y selector de sincronizacion
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          if 'def sync_cases_to_test_suite(' not in s:
+              marker = 'from reportlab.lib import colors\n'
+              helper = r'''def _az_request_json(url, pat, method, payload, content_type="application/json"):
+    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(url, method=method, data=body, headers={
+        "Authorization": f"Basic {token}",
+        "Accept": "application/json",
+        "Content-Type": content_type,
+        "User-Agent": "Agente-QA-Streamlit/1.0",
+    })
+    try:
+        with urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1800]
+        except Exception:
+            pass
+        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
+    except URLError as exc:
+        raise AzureDevOpsError(f"No fue posible comunicarse con Azure DevOps: {exc.reason}") from exc
+
+
+def _steps_to_azure_xml(steps):
+    rows = []
+    for i, step in enumerate(steps or [], 1):
+        action = escape(safe_text(step.get("Action")))
+        expected = escape(safe_text(step.get("Expected value")))
+        rows.append(
+            f'<step id="{i}" type="ActionStep">'
+            f'<parameterizedString isformatted="true">{action}</parameterizedString>'
+            f'<parameterizedString isformatted="true">{expected}</parameterizedString>'
+            f'<description/></step>'
+        )
+    return f'<steps id="0" last="{len(rows)}">{"".join(rows)}</steps>'
+
+
+def _azure_description_html(tc):
+    def section(label, value):
+        value = safe_text(value)
+        if not value:
+            return ""
+        lines = [x.strip() for x in value.splitlines() if x.strip()]
+        head = f"<p><strong>{escape(label)}:</strong>"
+        if len(lines) == 1:
+            return head + f" {escape(lines[0])}</p>"
+        body = "</p><ul>" + "".join(f"<li>{escape(x)}</li>" for x in lines) + "</ul>"
+        return head + body
+    return "".join([
+        section("Producto", tc.get("Product")),
+        section("Módulo", tc.get("Module")),
+        section("Descripción", tc.get("Description")),
+        section("Resultado esperado de la prueba", tc.get("Expected Result")),
+        section("Precondiciones", tc.get("Preconditions")),
+        section("Caso de uso relacionado", tc.get("Related Use Case")),
+    ])
+
+
+def create_azure_test_case(tc):
+    cfg = _az_config()
+    _az_validate(cfg)
+    title = build_case_title(tc, safe_text(tc.get("ID"), "CP"))
+    fields = [
+        {"op": "add", "path": "/fields/System.Title", "value": title},
+        {"op": "add", "path": "/fields/System.Description", "value": _azure_description_html(tc)},
+        {"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": _steps_to_azure_xml(safe_steps(tc))},
+    ]
+    area = safe_text(EXCEL_CONFIGS[next(iter(EXCEL_CONFIGS))].get("area_path"))
+    if area:
+        fields.append({"op": "add", "path": "/fields/System.AreaPath", "value": area})
+    url = (
+        f"https://dev.azure.com/{quote(cfg['org'], safe='')}/"
+        f"{quote(cfg['project'], safe='')}/_apis/wit/workitems/$Test%20Case?api-version=7.1"
+    )
+    return _az_request_json(url, cfg["pat"], "POST", fields, "application/json-patch+json")
+
+
+def add_test_case_to_suite(plan_id, suite_id, work_item_id):
+    cfg = _az_config()
+    _az_validate(cfg)
+    path = f"Plans/{quote(str(plan_id), safe='')}/Suites/{quote(str(suite_id), safe='')}/TestCase"
+    url = _az_testplan_url(cfg, path) + "?api-version=7.1"
+    return _az_request_json(url, cfg["pat"], "POST", [{"workItem": {"id": int(work_item_id)}}])
+
+
+def sync_cases_to_test_suite(result, plan_id, suite_id, selected_indexes=None):
+    cases = result.get("TEST_CASES", []) or []
+    indexes = list(range(len(cases))) if selected_indexes is None else list(selected_indexes)
+    synced = []
+    for idx in indexes:
+        tc = cases[idx]
+        created = create_azure_test_case(tc)
+        work_item_id = created.get("id")
+        if not work_item_id:
+            raise AzureDevOpsError(f"Azure creó el CP pero no devolvió ID para {safe_text(tc.get('ID'), 'CP')}.")
+        add_test_case_to_suite(plan_id, suite_id, work_item_id)
+        synced.append({
+            "local_id": safe_text(tc.get("ID")),
+            "azure_id": work_item_id,
+            "title": build_case_title(tc, safe_text(tc.get("ID"), "CP")),
+            "test_plan_id": plan_id,
+            "suite_id": suite_id,
+        })
+    return synced
+
+
+'''
+              if marker not in s:
+                  raise SystemExit('No se encontró punto de inserción para funciones Azure')
+              s = s.replace(marker, helper + marker, 1)
+
+          start = s.find('st.divider()\n\n# ========================================================\n# SINCRONIZACIÓN CON TEST PLAN / SUITE — ESCRITURA CONTROLADA')
+          end_marker = '\n\nif result:\n    st.divider()\n    st.subheader("📊 Resultados")'
+          end = s.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('No se encontró el bloque actual de sincronización')
+
+          new_ui = r'''st.divider()
+
+# ========================================================
+# SINCRONIZACIÓN CON TEST PLAN / SUITE — ESCRITURA CONTROLADA
+# ========================================================
+if st.session_state.get("result_json"):
+    st.subheader("🔄 Sincronizar CP con Test Plan")
+    st.caption(
+        "Selecciona el alcance de CP, el Test Plan y la Suite destino. "
+        "La escritura en Azure ocurre únicamente después de una confirmación explícita."
+    )
+
+    sync_cases = st.session_state.result_json.get("TEST_CASES", []) or []
+    sync_labels = [
+        f"{safe_text(tc.get('ID'), f'CP-{i+1:05d}')} — "
+        f"{build_case_title(tc, safe_text(tc.get('ID'), 'CP'))[:100]}"
+        for i, tc in enumerate(sync_cases)
+    ]
+
+    if not sync_cases:
+        st.info("No hay CP generados para sincronizar.")
+    else:
+        st.markdown("### 1️⃣ ¿Qué CP deseas sincronizar?")
+        sync_mode = st.radio(
+            "Alcance",
+            ["Un solo CP", "Algunos CP", "Todos los CP"],
+            horizontal=True,
+            key="azure_sync_mode",
+        )
+
+        if sync_mode == "Un solo CP":
+            one_label = st.selectbox("Selecciona el CP", sync_labels, key="azure_sync_one")
+            selected_sync_indexes = [sync_labels.index(one_label)]
+        elif sync_mode == "Algunos CP":
+            selected_sync_labels = st.multiselect(
+                "Selecciona los CP",
+                sync_labels,
+                key="azure_sync_some",
+            )
+            selected_sync_indexes = [sync_labels.index(x) for x in selected_sync_labels]
+        else:
+            selected_sync_indexes = list(range(len(sync_cases)))
+            st.info(f"Se sincronizarán los {len(selected_sync_indexes)} CP generados.")
+
+        st.markdown("### 2️⃣ Selecciona el destino")
+        sync_plans = st.session_state.get("azure_reference_plans", [])
+        if not sync_plans:
+            st.info("Consulta primero los Test Plans desde el panel de Azure DevOps.")
+        else:
+            sync_plan_options = [
+                f"{_ui_text(p.get('id'), 'SIN ID')} — {_ui_text(p.get('name'), 'Test Plan sin nombre')}"
+                for p in sync_plans
+            ]
+            sync_plan_label = st.selectbox(
+                "Test Plan destino",
+                sync_plan_options,
+                key="azure_sync_plan_select",
+            )
+            sync_plan_id = sync_plans[sync_plan_options.index(sync_plan_label)].get("id")
+
+            sync_suites = st.session_state.get("azure_reference_suites", [])
+            if st.session_state.get("azure_reference_plan_id") != sync_plan_id:
+                st.warning("Consulta las Suites del Test Plan seleccionado para habilitar el destino.")
+            elif not sync_suites:
+                st.info("Consulta las Suites del Test Plan seleccionado.")
+            else:
+                sync_suite_options = [
+                    f"{_ui_text(s.get('id'), 'SIN ID')} — {_ui_text(s.get('name'), 'Suite sin nombre')}"
+                    for s in sync_suites
+                ]
+                sync_suite_label = st.selectbox(
+                    "Suite destino",
+                    sync_suite_options,
+                    key="azure_sync_suite_select",
+                )
+                sync_suite_id = sync_suites[sync_suite_options.index(sync_suite_label)].get("id")
+
+                st.markdown("### 3️⃣ Confirmación")
+                st.write(
+                    f"**Destino:** Test Plan {sync_plan_id} → Suite {sync_suite_id}  "
+                    f"| **CP seleccionados:** {len(selected_sync_indexes)}"
+                )
+                confirm_sync = st.checkbox(
+                    "Confirmo que deseo crear estos CP en Azure DevOps y asociarlos a la Suite seleccionada.",
+                    key="azure_sync_confirm",
+                )
+
+                if st.button(
+                    "🚀 Sincronizar CP con Test Plan / Suite",
+                    type="primary",
+                    disabled=(not confirm_sync or not selected_sync_indexes),
+                    key="azure_sync_cases",
+                ):
+                    try:
+                        with st.spinner("Creando Test Cases y asociándolos a la Suite seleccionada..."):
+                            synced = sync_cases_to_test_suite(
+                                st.session_state.result_json,
+                                sync_plan_id,
+                                sync_suite_id,
+                                selected_sync_indexes,
+                            )
+                        st.success(
+                            f"✅ {len(synced)} CP sincronizados correctamente con la Suite seleccionada."
+                        )
+                        st.dataframe(pd.DataFrame(synced), width="stretch", hide_index=True)
+                    except AzureDevOpsError as exc:
+                        st.error(f"❌ No se pudieron sincronizar los CP: {exc}")
+                    except Exception as exc:
+                        st.error(f"❌ Error inesperado durante la sincronización: {exc}")
+'''
+          s = s[:start] + new_ui + s[end:]
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          python -m py_compile app.py
+
+      - name: Guardar integración en main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Integrar selector completo de sincronizacion Azure en main" || true
+          git push
+
+      - name: Eliminar workflow temporal
+        if: always()
+        run: |
+          git rm .github/workflows/integrate-azure-sync-main.yml || true
+          git commit -m "Eliminar workflow temporal de integracion Azure" || true
+          git push || true
