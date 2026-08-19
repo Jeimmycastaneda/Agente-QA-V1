@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import streamlit as st
 
@@ -15,15 +16,14 @@ def _read_prompt() -> str:
     raise FileNotFoundError("No se encontró prompts/qa_base.md ni prompt_qa.txt.")
 
 
-def render_generation_section(settings=None):
-    """Genera CP usando la configuración centralizada de la aplicación."""
-    settings = settings or st.session_state.get("qa_settings", {})
+def render_generation_section(settings: dict | None = None):
     st.divider()
     st.subheader("🧪 Generación QA")
 
-    api_key = settings.get("api_key", "")
-    model = settings.get("model", "gemini-3.6-flash")
-    config_key = settings.get("config_key", "Autos Colectivos")
+    settings = settings or st.session_state.get("qa_settings", {})
+    api_key = str(settings.get("api_key", "")).strip()
+    model = str(settings.get("model", "gemini-3.6-flash")).strip()
+    config_key = str(settings.get("config_key", "Autos Colectivos")).strip()
 
     source = st.session_state.get("source_content", "")
     disabled = not bool(source.strip())
@@ -38,9 +38,7 @@ def render_generation_section(settings=None):
                 result = generate_qa_data(provider, prompt, source)
                 st.session_state.result_json = result
                 st.session_state.excel_data = create_excel(result, config_key)
-                st.session_state.pdf_data = create_pdf(
-                    result, config_key, st.session_state.get("source_name", "")
-                )
+                st.session_state.pdf_data = create_pdf(result, config_key, st.session_state.get("source_name", ""))
             st.success("✅ Generación completada.")
         except Exception as exc:
             st.error(f"❌ Error durante la generación: {exc}")
@@ -51,19 +49,14 @@ def render_generation_section(settings=None):
         c1, c2 = st.columns(2)
         if st.session_state.get("excel_data"):
             c1.download_button(
-                "⬇️ Descargar Excel",
-                data=st.session_state.excel_data,
+                "⬇️ Descargar Excel", data=st.session_state.excel_data,
                 file_name="Agente_QA_Azure_Import.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
-                key="download_excel_qa",
+                width="stretch", key="download_excel_qa",
             )
         if st.session_state.get("pdf_data"):
             c2.download_button(
-                "⬇️ Descargar PDF",
-                data=st.session_state.pdf_data,
+                "⬇️ Descargar PDF", data=st.session_state.pdf_data,
                 file_name="Agente_QA_Test_Plan.pdf",
-                mime="application/pdf",
-                width="stretch",
-                key="download_pdf_qa",
+                mime="application/pdf", width="stretch", key="download_pdf_qa",
             )
