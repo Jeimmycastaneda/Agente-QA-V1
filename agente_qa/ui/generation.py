@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import streamlit as st
 
@@ -9,32 +8,22 @@ from agente_qa.export.pdf import create_pdf
 
 
 def _read_prompt() -> str:
-    candidates = [
-        Path("prompts/qa_base.md"),
-        Path("prompt_qa.txt"),
-    ]
+    candidates = [Path("prompts/qa_base.md"), Path("prompt_qa.txt")]
     for path in candidates:
         if path.exists():
             return path.read_text(encoding="utf-8")
     raise FileNotFoundError("No se encontró prompts/qa_base.md ni prompt_qa.txt.")
 
 
-def render_generation_section():
+def render_generation_section(settings=None):
+    """Genera CP usando la configuración centralizada de la aplicación."""
+    settings = settings or st.session_state.get("qa_settings", {})
     st.divider()
     st.subheader("🧪 Generación QA")
 
-    with st.sidebar:
-        api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-        if not api_key:
-            api_key = st.text_input("🔑 Google Gemini API Key", type="password")
-        model = st.selectbox(
-            "Modelo",
-            ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
-        )
-        config_key = st.selectbox(
-            "Formato de Excel",
-            ["Autos Colectivos", "Siniestros Fasecolda", "General QA"],
-        )
+    api_key = settings.get("api_key", "")
+    model = settings.get("model", "gemini-3.6-flash")
+    config_key = settings.get("config_key", "Autos Colectivos")
 
     source = st.session_state.get("source_content", "")
     disabled = not bool(source.strip())
