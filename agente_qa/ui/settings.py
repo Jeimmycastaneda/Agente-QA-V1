@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import streamlit as st
-from agente_qa.integrations.azure_devops import AzureDevOpsConfig, validate_connection
+from agente_qa.integrations.azure_devops import AzureDevOpsConfig, list_test_plans
 
 
 def _secret_or_env(name: str) -> str:
@@ -45,11 +45,10 @@ def render_settings_section() -> dict:
             if not cfg.enabled:
                 raise RuntimeError("Azure DevOps no está habilitado. Configura AZDO_ENABLED=true o un PAT.")
             with st.spinner("Verificando conexión con Azure DevOps..."):
-                payload = validate_connection(cfg)
+                plans = list_test_plans(cfg, limit=1)
             st.sidebar.success("✅ Conexión con Azure DevOps correcta.")
             st.sidebar.caption(f"Organización: {cfg.organization} | Proyecto: {cfg.project}")
-            if isinstance(payload, dict) and payload.get("name"):
-                st.sidebar.info(f"Proyecto validado: {payload.get('name')}")
+            st.sidebar.info(f"Acceso validado. Test Plans visibles: {len(plans)}")
         except Exception as exc:
             st.sidebar.error(f"❌ No se pudo conectar con Azure DevOps: {exc}")
 
