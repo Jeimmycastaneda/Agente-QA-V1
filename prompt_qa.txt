@@ -79,18 +79,37 @@ REGLA 4 — TÍTULO
 
 El título debe seguir exactamente:
 
-CP-[INICIALES_MODULO][INICIALES_SUITE]-##### [DESCRIPCIÓN]
+CP-AC-[SIGLAS_SUITE]-##### [DESCRIPCIÓN]
 
 Para Autos Colectivos:
 
 AC = módulo.
 
-Las siguientes iniciales corresponden a la Suite funcional.
+[SIGLAS_SUITE] corresponde exclusivamente a la Suite funcional que se está
+trabajando. Toma las siglas de la Suite, con un máximo de tres caracteres; no
+inventes ni completes letras que no estén sustentadas por el nombre de la
+Suite.
 
 Ejemplo:
 
-CP-ACOE-00005 Crear subsección Tasas por Producto en la sección Información
-Cuenta con matriz de modelos
+Suite: Reactivación de Cotización
+Siglas de Suite: RC
+
+Los títulos deben quedar:
+
+CP-AC-RC-00001 [Descripción]
+CP-AC-RC-00002 [Descripción]
+CP-AC-RC-00003 [Descripción]
+
+El consecutivo debe iniciar en 00001 para cada Suite y aumentar de uno en uno
+según los CP generados para esa Suite.
+
+Si se cambia de Suite, el consecutivo vuelve a 00001 y se utilizan las siglas
+de la nueva Suite.
+
+Todos los CP de una misma Suite deben conservar las mismas siglas de Suite.
+
+No reutilizar el consecutivo de otra Suite.
 
 El título debe ser descriptivo.
 
@@ -119,7 +138,7 @@ La Description debe incluir, cuando estén documentados:
 
 - perfil;
 - punto de entrada;
-- ruta;
+- ruta de navegación;
 - módulo;
 - icono;
 - menú;
@@ -145,6 +164,27 @@ La Description debe incluir, cuando estén documentados:
 - valores fijos;
 - valores vacíos.
 
+La ruta de navegación debe quedar inmersa dentro del texto de Description,
+naturalmente redactada como parte del escenario.
+
+NO crear dentro de Description un campo, etiqueta o bloque independiente con
+los nombres:
+
+"Ruta:"
+"Ruta sugerida:"
+"Ruta estimada:"
+"Ruta funcional:"
+"Navegación:"
+
+Ejemplo correcto:
+
+"Ingresar con usuario del perfil suscriptor, seleccionar el icono de autos
+colectivos, consultar colectivo en estado cotizado y validar..."
+
+Ejemplo incorrecto:
+
+"Ruta: Autos > Consulta > Cotizaciones"
+
 No reduzcas una regla compleja a una frase genérica.
 
 Ejemplo incorrecto:
@@ -160,10 +200,12 @@ todas las coberturas básicas, para asignar al producto nuevo la distribución
 correspondiente."
 
 ============================================================
-REGLA 6 — RUTA FUNCIONAL
+REGLA 6 — RUTA FUNCIONAL EN DESCRIPTION
 ============================================================
 
 La ruta funcional NO debe aparecer como un campo independiente.
+
+La ruta debe estar inmersa en la Description del Test Case.
 
 NO crear:
 
@@ -172,7 +214,9 @@ Ruta estimada:
 Ruta funcional:
 Navegación:
 
-La ruta debe formar parte de la Description.
+Los Steps también deben seguir esa navegación mediante acciones ejecutables,
+pero la referencia completa de la ruta debe quedar expresada dentro de la
+Description.
 
 Usa los Test Cases reales de Azure DevOps seleccionados como referencia para
 identificar el patrón de navegación, perfil y terminología.
@@ -320,6 +364,9 @@ Caso de uso relacionado:
 
 Cada bloque debe estar separado visualmente.
 
+La ruta de navegación debe formar parte del bloque "Descripción:" y no debe
+crearse ningún bloque adicional para la ruta.
+
 Utilizar saltos de línea reales.
 
 NO utilizar:
@@ -393,11 +440,12 @@ C. Títulos:
 
 Todos siguen:
 
-CP-[MODULO][SUITE]-##### ...
+CP-AC-[SIGLAS_SUITE]-##### ...
 
 D. Description:
 
-Tiene ruta funcional cuando está sustentada.
+Tiene la ruta funcional inmersa en el bloque Descripción cuando está
+sustentada.
 
 E. Detalle:
 
@@ -421,6 +469,11 @@ H. Escenarios:
 
 Nuevo/Renovación solo se separan cuando existe diferencia funcional.
 
+I. Consecutivo por Suite:
+
+El primer CP de cada Suite es 00001 y los siguientes aumentan
+secuencialmente dentro de esa Suite.
+
 ============================================================
 REGLA 16 — PRIORIDAD
 ============================================================
@@ -442,3 +495,63 @@ NO sacrificar la cobertura completa de CU para generar CP más elaborados.
 Primero garantiza que TODOS los CU tengan CP.
 
 Después mejora el nivel de detalle de cada CP.
+
+============================================================
+REGLA 17 — DIVISIÓN DE CP POR DIFERENCIA FUNCIONAL
+============================================================
+
+Un CU debe tener como mínimo un CP, pero esto NO significa que todo el CU
+deba quedar forzado dentro de un único CP.
+
+Si dentro del mismo CU existen funcionalidades, reglas, comportamientos,
+condiciones, resultados o validaciones claramente diferenciados, genera CP
+independientes para cada bloque funcional cuando sea necesario para mantener
+pruebas ejecutables y manejables.
+
+Ejemplo:
+
+Si un mismo CU define:
+
+- opciones de Acciones;
+- sección Estado Final Cotización;
+- ubicación del campo Estado;
+
+pueden generarse CP independientes porque son validaciones funcionales
+diferenciadas, manteniendo el mismo CU relacionado.
+
+No dividir un CP únicamente porque tenga muchos Steps si todos los Steps
+validan el mismo comportamiento funcional.
+
+La división debe responder a una diferencia funcional real.
+
+============================================================
+REGLA 18 — CONSECUTIVO INDEPENDIENTE POR SUITE
+============================================================
+
+El consecutivo de los títulos es independiente para cada Suite.
+
+Para cada Suite nueva:
+
+- iniciar en 00001;
+- aumentar 00002, 00003, 00004... según los CP de esa Suite;
+- no continuar el consecutivo de otra Suite.
+
+Las siglas de la Suite se mantienen iguales para todos los CP de esa Suite.
+
+Ejemplo:
+
+Suite Reactivación de Cotización:
+
+CP-AC-RC-00001 ...
+CP-AC-RC-00002 ...
+CP-AC-RC-00003 ...
+
+Otra Suite:
+
+CP-AC-[SIGLAS_NUEVA_SUITE]-00001 ...
+
+No reutilizar el código de Suite de otra Suite.
+
+============================================================
+FIN DE AJUSTES VIGENTES
+============================================================
