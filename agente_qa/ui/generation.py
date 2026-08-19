@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import streamlit as st
 
@@ -24,6 +23,8 @@ def render_generation_section(settings: dict | None = None):
     api_key = str(settings.get("api_key", "")).strip()
     model = str(settings.get("model", "gemini-3.6-flash")).strip()
     config_key = str(settings.get("config_key", "Autos Colectivos")).strip()
+    max_retries = max(0, int(settings.get("max_retries", 2)))
+    wait_time = max(1, int(settings.get("wait_time", 10)))
 
     source = st.session_state.get("source_content", "")
     disabled = not bool(source.strip())
@@ -34,11 +35,14 @@ def render_generation_section(settings: dict | None = None):
         try:
             with st.spinner("Analizando documentación y generando casos..."):
                 prompt = _read_prompt()
-                provider = GeminiProvider(api_key, model=model)
+                provider = GeminiProvider(api_key, model=model, max_retries=max_retries)
+                # wait_time se conserva como configuración de la UI para mantener
+                # el contrato de main; el proveedor controla los backoff internos.
                 result = generate_qa_data(provider, prompt, source)
                 st.session_state.result_json = result
                 st.session_state.excel_data = create_excel(result, config_key)
                 st.session_state.pdf_data = create_pdf(result, config_key, st.session_state.get("source_name", ""))
+                st.session_state.generation_wait_time = wait_time
             st.success("✅ Generación completada.")
         except Exception as exc:
             st.error(f"❌ Error durante la generación: {exc}")
