@@ -1,4 +1,4 @@
-"""Exportación Excel compatible con Azure DevOps Test Plans."""
+"""Exportación Excel compatible con el formato Azure DevOps de main."""
 from __future__ import annotations
 
 import io
@@ -18,7 +18,7 @@ def _text(*values, default=""):
     for value in values:
         if value is None:
             continue
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
             value = "\n".join(str(x) for x in value if x is not None)
         elif isinstance(value, dict):
             value = str(value)
@@ -43,10 +43,27 @@ def _case_id(raw_id, module, index, prefix):
 
 
 def _title(tc, case_id):
-    title = _text(tc.get("Title"))
+    title = re.sub(r"\s+", " ", _text(tc.get("Title"))).strip()
     if not title or title.upper() == case_id.upper() or re.fullmatch(r"CP-[A-Z0-9_-]+-\d{5}", title, re.I):
-        title = _text(tc.get("Scenario"), tc.get("Description"), tc.get("Related Use Case"), default=f"Caso de prueba {case_id}")
-    return title if title.upper().startswith(case_id.upper() + " ") else f"{case_id} {title}"
+        title = re.sub(r"\s+", " ", _text(tc.get("Scenario"), tc.get("Description"), tc.get("Related Use Case"), default=f"Caso de prueba {case_id}")).strip()
+    return title if title.upper().startswith(case_id.upper()) else f"{case_id} - {title}"
+
+
+def _normalize_description(description):
+    text = _text(description).replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+    labels = ["Producto:", "Módulo:", "Descripción:", "Resultado esperado de la prueba:", "Precondiciones:", "Caso de uso relacionado:"]
+    for label in labels:
+        text = re.sub(rf"\s*{re.escape(label)}\s*", f"\n{label} ", text, count=1, flags=re.I)
+    text = re.sub(r"(?m)^\s*[•●▪◦]\s*", "- ", text)
+    text = re.sub(r"(?m)^\s*[o]\s+", "- ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    for label in labels:
+        text = re.sub(rf"(?m)^{re.escape(label)}\s*", f"**{label}** ", text)
+    for label in labels[1:]:
+        text = re.sub(rf"\n\*\*{re.escape(label)}\*\*", f"\n\n**{label}**", text)
+    return re.sub(r"[ \t]*\|[ \t]*(?=\n|$)", "", text).strip()
 
 
 def _description(tc, data):
@@ -58,7 +75,7 @@ def _description(tc, data):
         ("Precondiciones", _text(tc.get("Preconditions"), default="Pendiente")),
         ("Caso de uso relacionado", _text(tc.get("Related Use Case"), tc.get("RelatedUseCase"), tc.get("Caso de uso relacionado"), default="Pendiente")),
     ]
-    return "\n\n".join(f"{label}: {value}" for label, value in fields).replace("|", "")
+    return _normalize_description("\n\n".join(f"{label}: {value}" for label, value in fields))
 
 
 def _coverage_for_case(data, tc):
@@ -103,12 +120,11 @@ def create_excel(data, config_key="Autos Colectivos"):
         coverage = _coverage_for_case(data, tc)
         alerts = _case_alerts(data, tc, coverage)
 
+        # Igual que main: IDPadre queda vacío en el Excel de importación.
         azure_rows.append({
             "ID": "", "Work Item Type": "Test Case", "Title": title, "Description": description,
             "Test Step": "", "Step Action": "", "Step Expected": "", "Area Path": config["area_path"],
-            "IDPadre": _text(tc.get("IDPadre")),
-            "Tipo Origen Proyecto": _text(tc.get("Tipo Origen Proyecto"), tc.get("TipoOrigenProyecto"), default="Proyecto"),
-            "Tiempo Real": _text(tc.get("Tiempo Real")), "Assigned To": config["assigned_to"], "State": config["state"],
+            "IDPadre": "", "Tipo Origen Proyecto": "Proyecto", "Tiempo Real": "", "Assigned To": config["assigned_to"], "State": config["state"],
         })
 
         export_steps = steps or [{"Step #": 1, "Action": "Información insuficiente para definir el paso.", "Expected value": "Validar con el equipo funcional antes de ejecutar."}]
