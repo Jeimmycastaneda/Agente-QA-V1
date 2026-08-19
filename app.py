@@ -325,56 +325,6 @@ def add_test_cases_to_suite(plan_id, suite_id, work_item_ids):
     return payload.get("value", payload if isinstance(payload, list) else [])
 
 
-def add_parent_relation_to_work_item(work_item_id, parent_id):
-    """Agrega Related Work -> Parent al Test Case creado.
-
-    Por solicitud funcional, el Parent se toma del ID de la Suite destino.
-    Azure debe aceptar ese ID como Work Item para que el vínculo Parent sea válido.
-    """
-    cfg = _az_config()
-    _az_validate(cfg)
-
-    work_item_id = safe_text(work_item_id)
-    parent_id = safe_text(parent_id)
-    if not work_item_id or not parent_id:
-        raise AzureDevOpsError(
-            "No se pudo configurar el Parent: falta el ID del Test Case o el ID de la Suite destino."
-        )
-
-    org = quote(cfg["org"], safe="")
-    project = quote(cfg["project"], safe="")
-    url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
-        f"{quote(str(work_item_id), safe='')}?api-version=7.1"
-    )
-
-    parent_url = (
-        f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems/"
-        f"{quote(str(parent_id), safe='')}"
-    )
-
-    patch = [{
-        "op": "add",
-        "path": "/relations/-",
-        "value": {
-            "rel": "System.LinkTypes.Hierarchy-Reverse",
-            "url": parent_url,
-            "attributes": {
-                "comment": f"Parent configurado con el ID de la Suite destino {parent_id}."
-            },
-        },
-    }]
-
-    payload, _ = _az_request_json(
-        url,
-        cfg["pat"],
-        method="PATCH",
-        payload=patch,
-        content_type="application/json-patch+json",
-    )
-    return payload
-
-
 def create_selected_cases_in_azure(cases, target_plan, target_suite):
     """Crea y asocia los CP seleccionados, devolviendo resultado por caso."""
     created, work_item_ids, errors = [], [], []
@@ -385,22 +335,12 @@ def create_selected_cases_in_azure(cases, target_plan, target_suite):
             azure_id = wi.get("id")
             if not azure_id:
                 raise AzureDevOpsError("Azure no devolvió el ID del Work Item creado.")
-
-            # Related Work -> Parent: usar el ID de la Suite destino,
-            # tal como se solicitó para esta versión.
-            suite_parent_id = safe_text(target_suite.get("id"))
-            if not suite_parent_id:
-                raise AzureDevOpsError("La Suite destino no tiene un ID válido para configurar el Parent.")
-
-            add_parent_relation_to_work_item(azure_id, suite_parent_id)
-
             work_item_ids.append(int(azure_id))
             created.append({
                 "cp_id": cp_id,
                 "title": build_case_title(tc, cp_id),
                 "azure_id": int(azure_id),
-                "parent_id": suite_parent_id,
-                "status": "Work Item creado, Parent configurado y pendiente de asociar a Suite",
+                "status": "Work Item creado; pendiente de asociar a Suite",
             })
         except Exception as exc:
             errors.append({"cp_id": cp_id, "error": str(exc)})
@@ -851,7 +791,7 @@ except ImportError:
     genai = None
     types = None
 
-APP_VERSION = "V49-ESTABLE-PROFUNDIDAD"
+APP_VERSION = "V43-CAMPOS-REQUERIDOS-AZURE"
 MODEL = "gemini-3.6-flash"
 FALLBACK_MODELS = [
     "gemini-3.6-flash",
@@ -1075,10 +1015,9 @@ def normalize_validation_method(value):
 def _remove_trailing_pipe(value):
     """Elimina únicamente un pipe sobrante al final, conservando espacios y saltos internos."""
     text = safe_text(value)
-    # Quita pipes sobrantes al final del valor o justo antes de un salto de línea.
+    # Solo quita pipes que hayan quedado al final del contenido.
     # No toca pipes internos ni modifica la separación entre secciones.
-    text = re.sub(r"[ \t]*\|[ \t]*(?=\n|$)", "", text)
-    return text.rstrip()
+    return re.sub(r"\s*\|\s*$", "", text).rstrip()
 
 
 def build_azure_description(product, module, description, expected, preconditions, related_use_case):
@@ -1144,11 +1083,6 @@ def format_description_for_azure(description):
     for label in labels[1:]:
         text = re.sub(rf"\n\*\*{re.escape(label)}\*\*", f"\n\n**{label}**", text)
     text = re.sub(r"^\*\*Producto:\*\*", "**Producto:**", text)
-
-    # IMPORTANTE: elimina únicamente pipes que quedaron como separadores
-    # al final de una sección. No elimina pipes internos que formen parte
-    # del contenido funcional. Conserva los saltos de línea y espacios.
-    text = re.sub(r"[ \t]*\|[ \t]*(?=\n|$)", "", text)
 
     return text.strip()
 
@@ -1336,7 +1270,7 @@ def extract_source(uploaded_file):
 
 
 # ============================================================
-# PROMPT QA V34 — profundidad funcional, formato y reglas vigentes
+# PROMPT EXISTENTE — SE CONSERVA SIN CAMBIOS
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_prompt():
@@ -2972,34 +2906,6 @@ if result:
         )
 
     # ========================================================
-    st.subheader("🧪 Casos generados")
-
-    preview_rows = []
-
-    for tc in result["TEST_CASES"]:
-        preview_rows.append({
-            "ID": safe_text(tc.get("ID")),
-            "Title": build_case_title(
-                tc,
-                normalize_case_id(
-                    tc.get("ID"),
-                    safe_text(tc.get("Module"), "GENERAL"),
-                    len(preview_rows) + 1,
-                    EXCEL_CONFIGS[selected_config]["title_prefix"],
-                ),
-            ),
-            "Module": safe_text(tc.get("Module")),
-            "Scenario Type": safe_text(tc.get("Scenario Type")),
-            "Steps": len(safe_steps(tc)),
-        })
-
-    st.dataframe(
-        pd.DataFrame(preview_rows),
-        width="stretch",
-    )
-
-    st.markdown("---")
-    st.info("🔄 **Sincronización con Azure DevOps:** revisa los CP generados arriba y luego selecciona cuáles cargar, el Test Plan y la Suite destino.")
     # CARGA CONTROLADA EN AZURE — DOS PASOS
     # ========================================================
     st.divider()
@@ -3078,7 +2984,7 @@ if result:
         st.markdown("### Datos obligatorios del proyecto para crear el Test Case")
         st.caption(
             "Azure exige estos campos personalizados en este proyecto. "
-            "El Related Work -> Parent del CP se configurará automáticamente con el ID de la Suite destino."
+            "IDPadre debe corresponder al Work Item padre real; no se sustituye por el Test Plan ni por la Suite."
         )
         inferred_parent = ""
         if selected_publish_ids:
@@ -3261,3 +3167,28 @@ if result:
     with st.expander("🔎 Ver JSON generado", expanded=False):
         st.json(result)
 
+    st.subheader("🧪 Casos generados")
+
+    preview_rows = []
+
+    for tc in result["TEST_CASES"]:
+        preview_rows.append({
+            "ID": safe_text(tc.get("ID")),
+            "Title": build_case_title(
+                tc,
+                normalize_case_id(
+                    tc.get("ID"),
+                    safe_text(tc.get("Module"), "GENERAL"),
+                    len(preview_rows) + 1,
+                    EXCEL_CONFIGS[selected_config]["title_prefix"],
+                ),
+            ),
+            "Module": safe_text(tc.get("Module")),
+            "Scenario Type": safe_text(tc.get("Scenario Type")),
+            "Steps": len(safe_steps(tc)),
+        })
+
+    st.dataframe(
+        pd.DataFrame(preview_rows),
+        width="stretch",
+    )
