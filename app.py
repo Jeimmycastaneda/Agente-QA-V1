@@ -17,6 +17,7 @@ import base64
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from agente_qa import extraction as qa_extraction
 
 class AzureDevOpsError(RuntimeError):
     pass
@@ -2702,7 +2703,7 @@ if uploaded:
     if st.session_state.source_name != uploaded.name:
         try:
             with st.spinner(f"Procesando {uploaded.name}..."):
-                source_text = extract_source(uploaded)
+                source_text = qa_extraction.extract_source(uploaded)
 
             st.session_state.source_content = source_text
             st.session_state.source_name = uploaded.name
