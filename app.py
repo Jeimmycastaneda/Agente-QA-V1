@@ -11,7 +11,7 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
-from editor_azure import render_azure_style_editor, delete_test_case
+from agente_qa.ui.editor_azure import render_azure_style_editor, delete_test_case
 
 import base64
 from urllib.error import HTTPError, URLError
@@ -38,36 +38,32 @@ def _az_validate(cfg):
     if missing:
         raise AzureDevOpsError("Faltan secretos de Azure DevOps: " + ", ".join(missing))
 
-def _az_get_json(url, pat):
+def _az_auth_header(pat):
     token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
-    req = Request(
-        url,
-        method="GET",
-        headers={
-            "Authorization": f"Basic {token}",
-            "Accept": "application/json",
-            "User-Agent": "Agente-QA-Streamlit/1.0",
-        },
-    )
+    return f"Basic {token}"
+
+
+def _az_send(req, timeout, detail_limit, unauthorized_message, not_found_message=None):
+    """Ejecuta la petición HTTP a Azure y traduce errores a AzureDevOpsError.
+
+    Centraliza el manejo de HTTPError/URLError que antes estaba duplicado
+    entre _az_get_json y _az_request_json; los mensajes por caso de error
+    los define cada llamador para no cambiar el texto mostrado al usuario.
+    """
     try:
-        with urlopen(req, timeout=20) as response:
-            return json.loads(response.read().decode("utf-8")), response.headers
+        with urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            return (json.loads(raw) if raw else {}), response.headers
     except HTTPError as exc:
         detail = ""
         try:
-            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            detail = exc.read().decode("utf-8", errors="replace")[:detail_limit]
         except Exception:
             pass
         if exc.code in (401, 403):
-            raise AzureDevOpsError(
-                f"Azure rechazó la autenticación/autorización (HTTP {exc.code}). "
-                "Verifica el PAT, su vigencia y sus scopes."
-            ) from exc
-        if exc.code == 404:
-            raise AzureDevOpsError(
-                "No se encontró el proyecto o el recurso de Test Plans. "
-                "Verifica AZURE_DEVOPS_ORG y AZURE_DEVOPS_PROJECT."
-            ) from exc
+            raise AzureDevOpsError(unauthorized_message.format(code=exc.code)) from exc
+        if exc.code == 404 and not_found_message:
+            raise AzureDevOpsError(not_found_message) from exc
         raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
     except URLError as exc:
         raise AzureDevOpsError(
@@ -75,39 +71,54 @@ def _az_get_json(url, pat):
         ) from exc
 
 
+def _az_get_json(url, pat):
+    req = Request(
+        url,
+        method="GET",
+        headers={
+            "Authorization": _az_auth_header(pat),
+            "Accept": "application/json",
+            "User-Agent": "Agente-QA-Streamlit/1.0",
+        },
+    )
+    return _az_send(
+        req,
+        timeout=20,
+        detail_limit=1000,
+        unauthorized_message=(
+            "Azure rechazó la autenticación/autorización (HTTP {code}). "
+            "Verifica el PAT, su vigencia y sus scopes."
+        ),
+        not_found_message=(
+            "No se encontró el proyecto o el recurso de Test Plans. "
+            "Verifica AZURE_DEVOPS_ORG y AZURE_DEVOPS_PROJECT."
+        ),
+    )
+
+
 def _az_request_json(url, pat, method="POST", payload=None, content_type="application/json"):
     """Solicitud Azure con escritura explícita; solo se invoca desde la confirmación de carga."""
-    token = base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     req = Request(
         url,
         method=method,
         data=body,
         headers={
-            "Authorization": f"Basic {token}",
+            "Authorization": _az_auth_header(pat),
             "Accept": "application/json",
             "Content-Type": content_type,
             "User-Agent": "Agente-QA-Streamlit/1.0",
         },
     )
-    try:
-        with urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            return json.loads(raw) if raw else {}, response.headers
-    except HTTPError as exc:
-        detail = ""
-        try:
-            detail = exc.read().decode("utf-8", errors="replace")[:1800]
-        except Exception:
-            pass
-        if exc.code in (401, 403):
-            raise AzureDevOpsError(
-                f"Azure rechazó la operación de escritura (HTTP {exc.code}). "
-                "Verifica que el PAT tenga permisos de Work Items/Test Plans y esté vigente."
-            ) from exc
-        raise AzureDevOpsError(f"Azure respondió HTTP {exc.code}. {detail}") from exc
-    except URLError as exc:
-        raise AzureDevOpsError(f"No fue posible comunicarse con Azure DevOps: {exc.reason}") from exc
+    return _az_send(
+        req,
+        timeout=30,
+        detail_limit=1800,
+        unauthorized_message=(
+            "Azure rechazó la operación de escritura (HTTP {code}). "
+            "Verifica que el PAT tenga permisos de Work Items/Test Plans y esté vigente."
+        ),
+    )
 
 
 def _azure_steps_xml(steps):
@@ -258,16 +269,17 @@ def create_azure_test_case_work_item(tc, target_plan):
     _az_validate(cfg)
     case_id = safe_text(tc.get("ID"), "CP-PREVIEW")
     title = build_case_title(tc, case_id)
-    description = safe_text(tc.get("Description"))
-    if not description:
-        description = build_azure_description(
-            safe_text(tc.get("Product"), "Cotizadores Web"),
-            safe_text(tc.get("Module"), "Cotizador Autos Colectivos"),
-            safe_text(tc.get("Scenario"), title),
-            safe_text(tc.get("Expected Result"), "Pendiente"),
-            safe_text(tc.get("Preconditions"), "Pendiente"),
-            safe_text(tc.get("Related Use Case"), "Pendiente"),
-        )
+    # Siempre arma el bloque completo (Producto, Módulo, Descripción, Resultado
+    # esperado, Precondiciones, Caso de uso relacionado): usar solo tc["Description"]
+    # descartaba el resto de los campos pedidos a Gemini.
+    description = build_azure_description(
+        safe_text(tc.get("Product"), "Cotizadores Web"),
+        safe_text(tc.get("Module"), "Cotizador Autos Colectivos"),
+        safe_text(tc.get("Description"), tc.get("Scenario"), title),
+        safe_text(tc.get("Expected Result"), "Pendiente"),
+        safe_text(tc.get("Preconditions"), "Pendiente"),
+        safe_text(tc.get("Related Use Case"), "Pendiente"),
+    )
 
     id_padre = _get_id_padre(tc)
     tipo_origen = _tipo_origen_proyecto(tc)
@@ -1175,7 +1187,7 @@ def aggregate_case_alerts(data, tc):
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_prompt():
-    path = "prompt_qa.txt"
+    path = "prompts/prompt_qa.txt"
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             content = f.read().strip()

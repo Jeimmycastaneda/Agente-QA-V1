@@ -96,18 +96,18 @@ La integración debe permanecer protegida y **deshabilitada por defecto** hasta 
 
 ## 📁 Estructura actual del repositorio
 
-La rama `main` contiene actualmente una aplicación Streamlit que concentra buena parte de la lógica en `app.py`, además de módulos específicos para edición y Azure DevOps:
+La rama `main` contiene actualmente una aplicación Streamlit que concentra buena parte de la lógica en `app.py`. Los módulos de edición, integración con Azure DevOps, prompt y configuración ya viven en su ubicación de módulo funcional (no hay copias duplicadas en la raíz):
 
 ```text
 Agente-QA-V1/
 │
-├── app.py                 # Punto de entrada y lógica principal actual
-├── editor_azure.py        # Editor de CP con estructura tipo Azure
-├── azure_devops.py        # Integración/conector Azure DevOps
-├── prompt_qa.txt          # Prompt QA / reglas del agente
-├── azure_config.txt       # Configuración relacionada con Azure
-├── azure_template_headers.txt
-├── requirements.txt       # Dependencias Python
+├── app.py                          # Punto de entrada y lógica principal actual
+├── agente_qa/ui/editor_azure.py    # Editor de CP con estructura tipo Azure
+├── agente_qa/integrations/azure_devops.py  # Integración/conector Azure DevOps
+├── prompts/prompt_qa.txt           # Prompt QA / reglas del agente
+├── config/azure_config.txt         # Configuración relacionada con Azure
+├── config/azure_template_headers.txt
+├── requirements.txt                # Dependencias Python
 └── README.md
 ```
 
